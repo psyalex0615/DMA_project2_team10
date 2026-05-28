@@ -1,0 +1,1 @@
+Correction to: ‘Selective machine learning of doubly robust functionals’. We would like to thank Anders Much for pointing out an oversight in the statement of Lemma 1 that we now rectify.In addition to Assumptions 3-5, Lemma 1 also requires Assumptions 6, 7 and 9.The result does not appear to hold without these additional conditions.

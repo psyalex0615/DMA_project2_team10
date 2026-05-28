@@ -1,0 +1,1 @@
+Admissible estimators of a multivariate normal mean vector when the scale is unknown. Summary We study admissibility of a subclass of generalized Bayes estimators of a multivariate normal vector in the case where the variance is unknown, under scaled quadratic loss. Minimaxity is established for some of these estimators.

@@ -1,0 +1,1 @@
+Correction to: ‘Optimal row-column designs’. 1. Page 7, Line 6: 'C is a p (pq) matrix' should be replaced by 'C is a p (qp) matrix'.2. Page 9, Line 1: 'go back to Step 3' should be replaced by 'go back to Step 1'. 3. Page 9, Line -2: 'two-level row-column design' should be replaced by 'three-level rowcolumn design'.

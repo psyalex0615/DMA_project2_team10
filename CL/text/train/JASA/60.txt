@@ -1,0 +1,1 @@
+Dissecting Gene Expression Heterogeneity: Generalized Pearson Correlation Squares and the K -Lines Clustering Algorithm. -lines clustering algorithm in dissecting complex but interpretable relationships. The estimation and inference procedures are implemented in the R package gR2 (https://github.com/lijy03/gR2).
