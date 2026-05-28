@@ -3,11 +3,14 @@ from sklearn.pipeline import Pipeline
 from sklearn import metrics
 import numpy as np
 import pickle
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import LinearSVC
 
 # ============================================================
 # !! TODO - 팀 번호를 수정하세요 !!
 # ============================================================
-TEAM = 0
+TEAM = 1  # 임시로 1팀으로 설정 (자신의 팀 번호로 변경 가능)
 
 # 데이터 설정
 categories = ['AnnStat', 'Biometrika', 'JASA', 'JMLR']
@@ -22,7 +25,10 @@ train_data = load_files(container_path='text/train', categories=categories,
 #     from sklearn.naive_bayes import MultinomialNB
 # Pipeline([('tfidf', TfidfVectorizer(...)), ('clf', MultinomialNB(...))])
 # ============================================================
-clf_nb = Pipeline([])
+clf_nb = Pipeline([
+    ('tfidf', TfidfVectorizer(max_df=0.5, min_df=3, ngram_range=(1, 3), sublinear_tf=True)),
+    ('clf', MultinomialNB(alpha=0.05))
+])
 clf_nb.fit(train_data.data, train_data.target)
 
 # ============================================================
@@ -31,7 +37,10 @@ clf_nb.fit(train_data.data, train_data.target)
 # 예: from sklearn.svm import LinearSVC
 # Pipeline([('tfidf', TfidfVectorizer(...)), ('clf', LinearSVC(...))])
 # ============================================================
-clf_svm = Pipeline([])
+clf_svm = Pipeline([
+    ('tfidf', TfidfVectorizer(max_df=1.0, min_df=3, ngram_range=(1, 2), sublinear_tf=True)),
+    ('clf', LinearSVC(C=1.0, dual='auto', random_state=42))
+])
 clf_svm.fit(train_data.data, train_data.target)
 
 # ╔════════════════════════════════════════════════════════════╗

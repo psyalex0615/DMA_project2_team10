@@ -5,8 +5,9 @@
 import os.path
 from whoosh.index import create_in
 from whoosh.fields import Schema, TEXT, NUMERIC
+from whoosh.analysis import StemmingAnalyzer
 
-schema = Schema(docID=NUMERIC(stored=True), contents=TEXT)
+schema = Schema(docID=NUMERIC(stored=True), contents=TEXT(analyzer=StemmingAnalyzer()))
 index_dir = "index"
 
 if not os.path.exists(index_dir):
@@ -16,7 +17,7 @@ ix = create_in(index_dir, schema)
 
 writer = ix.writer()
  
-with open('doc/document.txt', 'r') as f:
+with open('doc/document.txt', 'r', encoding='utf-8') as f:
     text = f.read()
     docs = text.split('   /\n')[:-1]
     for doc in docs:

@@ -137,8 +137,12 @@ def intappscorer(tf, idf, cf, qf, dc, fl, avgfl, param):
     # avgfl - average field length across documents    (평균 문서 길이)
     # param - free parameter                           (자유 파라미터)
 
-    # TODO - Define your own scoring function
-    return None
+    # Optimized BM25 parameters
+    B = 0.5
+    K1 = 0.5
+    
+    score = idf * ((tf * (K1 + 1)) / (tf + K1 * ((1 - B) + B * fl / avgfl)))
+    return score
 
 
 # ╔════════════════════════════════════════════════════════════╗
