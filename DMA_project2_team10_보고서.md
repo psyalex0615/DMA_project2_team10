@@ -102,6 +102,36 @@ $$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
 | **Optimized (최적화)** | **NLTK Porter Analyzer + Sublinear TF + BM25 Custom ($B=0.3, K_1=0.1$, IDF Boost 1.5) + OrGroup.factory(0.5)** | **0.2811** | **8.43점** | **+12.57% (최고의 최적화 달성) 🚀** |
 
+### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
+
+검색 엔진 성능 극대화를 목표로 다각적인 자연어 처리 및 정보 검색 모델 기법들을 추가 탐색하고 실험하였으나, 최종 평가 점수가 오히려 저하되거나 유의미한 이득이 없어 최종 채택에서 배제된 시도들과 그 원인에 대한 분석입니다.
+
+#### 2.3.1. 유사 피드백 기반 질의 확장 (Pseudo Relevance Feedback, PRF)
+* **시도 내용**:
+  * 질의어가 주어졌을 때, 1차 검색을 실행하여 관련도가 가장 높은 상위 $N$개 문서(Top-3)를 추출하고, 해당 문서군에서 빈도가 높으면서 정보량이 큰 핵심 단어들을 질의어 뒤에 추가(Query Expansion)한 후 2차 검색을 수행하는 PRF 모듈을 구현하여 적용했습니다.
+* **실험 결과**:
+  * **BPREF: 0.2687** (최적 모델 대비 **-4.38% 성능 저하**)
+* **실패 원인 분석**:
+  * 학술 논문 요약문 데이터셋의 특성상, abstract의 단어 밀도가 매우 높고 다양한 전문 용어가 혼재되어 있습니다. 1차 검색에서 약간의 매칭 오차로 인해 주제와 어긋난 문서가 상위 문서군에 유입될 경우, 질의 확장 과정에서 심각한 단어 노이즈가 주입되는 **질의 드리프트(Query Drift)** 현상이 심각하게 일어났습니다.
+
+#### 2.3.2. 구절 인접도 기반 가중치 검색 (Phrase Proximity Boosting)
+* **시도 내용**:
+  * 단일 단어 검색을 넘어서, 질의어 내의 인접한 단어들이 문서 내에서도 근거리에 함께 등장할 경우(예: `deep`과 `learning`이 2단어 이내로 인접) 가산점을 부여하는 Phrase Proximity 검색 및 Span-Query Boosting 기법을 적용했습니다.
+* **실험 결과**:
+  * **BPREF: 0.2468** (기본 베이스라인보다도 하락하는 결과 초래)
+* **실패 원인 분석**:
+  * 제공된 학술 질의어셋은 문법적으로 정형화된 구절보다는 자연어의 설명식 문장 형태(e.g., "deep neural networks for statistical model learning")를 띄고 있습니다.
+  * 구절 인접 조건을 지나치게 엄격하게 설정(strict proximity constraint)할 경우, 실제 관련이 깊은 문서임에도 단어 순서가 바뀌거나 중간에 다른 부사/형용사(e.g., "deep ... networks ... for learning")가 삽입된 유효한 문서들을 매칭에서 배제해 버리는 높은 **미검출율(False Negative Rate)**을 야기하여 성능이 급격히 저하되었습니다.
+
+#### 2.3.3. WordNet Lemmatizer 기반의 어휘 원형 복원 (Lemmatization)
+* **시도 내용**:
+  * 어간 추출(Porter Stemmer)이 단어의 꼬리만 자르는 과격한 방식이기 때문에, 사전 정보를 활용해 품사에 맞는 형태학적 어근을 복원하는 NLTK의 `WordNetLemmatizer`를 구축하여 색인 재생성을 시도했습니다.
+* **실험 결과**:
+  * **BPREF: 0.2649** (Porter Stemmer 최고 성능 대비 **-5.74% 하락**)
+* **실패 원인 분석**:
+  * Lemmatizer는 단어가 완전히 일치하거나 품사를 정확히 명시하지 않으면 원형 복원력이 매우 유연(gentle)하게 작용합니다.
+  * 예를 들어, `statistical`, `statistician`, `statistics`를 하나의 일치된 핵심 정보로 통합해야 하나, Lemmatizer 적용 시 여전히 다른 표제어로 보존되어 매칭 미스매치를 완전히 해소하지 못했습니다. 따라서 학술 검색 도메인에서는 보다 거칠고 공격적인 어간 추출(Porter Stemmer)이 훨씬 강력한 검색 랭킹 이점을 제공함이 실증되었습니다.
+
 ---
 
 ## 3. PART III: 문서 분류 (Document Classification)
