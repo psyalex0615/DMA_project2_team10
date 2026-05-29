@@ -145,8 +145,8 @@ def intappscorer(tf, idf, cf, qf, dc, fl, avgfl, param):
     elif isinstance(param, tuple) and len(param) == 4:
         B, K1, idf_thresh, idf_boost = param
     else:
-        B = 0.3
-        K1 = 0.1
+        B = 0.35
+        K1 = 0.08
         idf_thresh = 5.0
         idf_boost = 1.5
     

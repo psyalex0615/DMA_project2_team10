@@ -79,7 +79,7 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
   * 질의어가 "deep learning statistical theory"인 경우, 이 질의어는 `deep`, `learning`, `statistical`, `theory` 4개의 단어로 토큰화됩니다.
   * 단순 `OrGroup` 검색 환경에서는 단순히 'theory'라는 범용적 단어가 수백 번 적힌 문서가 'deep learning'이라는 두 단어가 동시에 등장한 핵심 문서보다 단순 스코어 합계로 인해 높은 랭크에 오르는 참사(Query Drift)가 발생합니다.
 * **해결 방안 (`QueryResult.py` 개선)**:
-  * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.5)`** 파서를 설정하여, 다수의 질의어 단어가 골고루 분포되어 매칭된 고밀도 관련 문서가 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 강력하게 우선 순위를 갖도록 조정하였습니다.
+  * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.4)`** 파서를 설정하여, 다수의 질의어 단어가 골고루 분포되어 매칭된 고밀도 관련 문서가 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 강력하게 우선 순위를 갖도록 조정하였습니다.
 
 #### 2.1.3. 스코어링 함수 튜닝 및 최적화: Sublinear TF + IDF Boost + BM25 조합 (`CustomScoring.py` 개선)
 * **분석 및 문제 인식**:
@@ -87,7 +87,7 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
 * **해결 방안**:
   * **Sublinear TF Scaling**: 단어 빈도수를 로그 스케일($1 + \log(tf)$ if $tf > 0$ else $0$)로 스케일링하여 고빈도 단어가 스코어를 왜곡하는 독점 현상을 효과적으로 예방하였습니다.
   * **IDF Rare Word Boosting**: 학술 질의어 중 `bayesian`, `stein`, `dirichlet` 같이 데이터셋 내에서 극소수 문서에만 등장하는 **희귀한 고-IDF 전문 단어**가 해당 쿼리의 주제를 압도적으로 대표하므로, $IDF \ge 5.0$인 어휘 매칭 시 **$1.5$배의 보너스 가중치(IDF Boost)**를 부여하는 스코어링 로직을 개발하여 직접 연계 적용하였습니다.
-  * **성밀 랭킹 그리드 탐색**: $B=0.3$, $K_1=0.1$로 미세 조정하여 최적의 길이 정규화와 어휘 가치 가산 비율을 확정하였습니다.
+  * **성밀 랭킹 그리드 탐색**: $B=0.35$, $K_1=0.08$로 미세 조정하여 최적의 길이 정규화와 어휘 가치 가산 비율을 확정하였습니다.
 
 $$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \text{Boost}(q) \cdot \frac{\text{TF}_{\text{scaled}}(q, D) \cdot (K_1 + 1)}{\text{TF}_{\text{scaled}}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
 $$\text{where } \text{TF}_{\text{scaled}}(q, D) = \begin{cases} 1 + \log(\text{TF}(q, D)) & \text{if } \text{TF}(q, D) > 0 \\ 0 & \text{otherwise} \end{cases}$$
@@ -100,7 +100,7 @@ $$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **NLTK Porter Analyzer + Sublinear TF + BM25 Custom ($B=0.3, K_1=0.1$, IDF Boost 1.5) + OrGroup.factory(0.5)** | **0.2811** | **8.43점** | **+12.57% (최고의 최적화 달성) 🚀** |
+| **Optimized (최적화)** | **NLTK Porter Analyzer + Sublinear TF + BM25 Custom ($B=0.35, K_1=0.08$, IDF Boost 1.5) + OrGroup.factory(0.4)** | **0.2824** | **8.47점** | **+13.09% (최고의 최적화 달성) 🚀** |
 
 ### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
 
