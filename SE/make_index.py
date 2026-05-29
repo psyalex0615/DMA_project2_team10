@@ -1,7 +1,3 @@
-# ============================================================
-# !! 기본 제공 index 생성 스크립트 !!
-# 기본 index를 사용하지 않을 경우에만 수정하세요.
-# ============================================================
 import os.path
 from whoosh.index import create_in
 from whoosh.fields import Schema, TEXT, NUMERIC
