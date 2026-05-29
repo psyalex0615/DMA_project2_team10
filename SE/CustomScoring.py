@@ -145,13 +145,19 @@ def intappscorer(tf, idf, cf, qf, dc, fl, avgfl, param):
     elif isinstance(param, tuple) and len(param) == 4:
         B, K1, idf_thresh, idf_boost = param
     else:
-        B = 0.5
-        K1 = 0.05
+        B = 0.3
+        K1 = 0.1
         idf_thresh = 5.0
         idf_boost = 1.5
     
+    # 1. Sublinear TF Scaling
+    tf_scaled = 1.0 + log(tf) if tf > 0 else 0.0
+    
+    # 2. IDF-based Rare Word Boosting
     boost = idf_boost if idf > idf_thresh else 1.0
-    score = idf * boost * ((tf * (K1 + 1)) / (tf + K1 * ((1 - B) + B * fl / avgfl)))
+    
+    # 3. BM25 calculation using tf_scaled
+    score = idf * boost * ((tf_scaled * (K1 + 1)) / (tf_scaled + K1 * ((1 - B) + B * fl / avgfl)))
     return score
 
 

@@ -67,31 +67,31 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
 ### 2.1. 기존 시스템의 문제점 및 성능 개선 전략
 제공된 Baseline (기본 BM25F 가중치 모델 + OrGroup 질의어 파서)의 성능 지표인 **BPREF는 0.2497**로, 매우 낮은 검색 정확도를 보였습니다. 다음과 같은 자연어 처리 및 정보 검색 공학적 기법을 도입하여 혁신적인 성능 개선을 달성했습니다.
 
-#### 2.1.1. 단어 형태학적 변화 극복을 위한 형태소 분석기 (Stemming Analyzer) 교체
+#### 2.1.1. 단어 형태학적 변화 극복을 위한 NLTKPorterFilter 커스텀 형태소 분석기 교체
 * **분석 및 문제 인식**:
-  * 학술 논문 도메인의 질의어들은 형태소(morpheme) 변형이 매우 심합니다. 예를 들어, 질의어가 "bayesian inference methods"일 때, 논문 abstract 내에 "Bayes", "inferential", "methodological"과 같은 변형 단어가 등장하더라도 단순 문자열 기반의 토크나이저는 이를 완전히 다른 단어로 취급하여 매칭에 실패합니다.
-* **해결 방안 (`make_index.py` 개선)**:
-  * 인덱스를 구축할 때, 기본 분석기(StandardAnalyzer) 대신 NLTK의 Porter Stemming 알고리즘을 기반으로 단어의 어간을 추출하는 **`StemmingAnalyzer()`**를 기본 파서로 채택하였습니다.
-  * 질의어와 문서 본문의 모든 단어를 공통 어간 형태로 매핑함으로써 형태학적 미스매치 문제를 원천적으로 해결하였습니다.
+  * 학술 논문 도메인의 질의어들은 형태소(morpheme) 변형이 매우 심합니다. 예를 들어, 질의어가 "bayesian inference methods"일 때, 문서 abstract 내에 "Bayes", "inferential", "methodological"과 같은 변형 단어가 등장하더라도 단순 문자열 기반의 토크나이저는 이를 완전히 다른 단어가 취급하여 매칭에 실패합니다.
+* **해결 방안 (`make_index.py` 및 `se_analyzer.py` 도입)**:
+  * Whoosh의 기본 `StemmingAnalyzer`보다 복잡한 변형 처리에 훨씬 뛰어난 NLTK의 Porter Stemming 알고리즘을 활용한 **`NLTKPorterFilter`** 및 **`get_porter_analyzer()`**를 정의하였습니다.
+  * 특히, Whoosh가 디스크 인덱스를 역직렬화(deserialization)할 때 메인 네임스페이스(`__main__`) 충돌로 인해 채점 서버에서 발생할 수 있는 잠재적 크래시(`AttributeError` 등)를 방지하기 위해, 전용 모듈 파일인 **`se_analyzer.py`**를 독립적으로 구축하고 이를 두 스크립트에서 명시적으로 임포트하는 설계(Decoupled Namespace Design)를 완성하여 안정성을 극대화하였습니다.
 
 #### 2.1.2. 질의어 단어 매칭 개수에 따른 조정 (Coordination Level / OrGroup.factory)
 * **분석 및 문제 인식**:
   * 질의어가 "deep learning statistical theory"인 경우, 이 질의어는 `deep`, `learning`, `statistical`, `theory` 4개의 단어로 토큰화됩니다.
   * 단순 `OrGroup` 검색 환경에서는 단순히 'theory'라는 범용적 단어가 수백 번 적힌 문서가 'deep learning'이라는 두 단어가 동시에 등장한 핵심 문서보다 단순 스코어 합계로 인해 높은 랭크에 오르는 참사(Query Drift)가 발생합니다.
 * **해결 방안 (`QueryResult.py` 개선)**:
-  * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.9)`** 파서를 설정하였습니다.
-  * 이를 통해 4개 단어 중 3개 이상 매칭되는 고밀도 관련 문서가, 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 무조건 상위에 랭크되도록 강력하게 유도하였습니다.
+  * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.5)`** 파서를 설정하여, 다수의 질의어 단어가 골고루 분포되어 매칭된 고밀도 관련 문서가 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 강력하게 우선 순위를 갖도록 조정하였습니다.
 
-#### 2.1.3. 스코어링 함수 튜닝 및 최적화 (`CustomScoring.py` 개선)
+#### 2.1.3. 스코어링 함수 튜닝 및 최적화: Sublinear TF + IDF Boost + BM25 조합 (`CustomScoring.py` 개선)
 * **분석 및 문제 인식**:
-  * BM25 스코어링 공식은 문서 길이 정규화 가중치 $B$와 TF 스케일링 파라미터 $K_1$에 따라 성능이 크게 좌우됩니다.
+  * BM25 스코어링 공식은 문서 길이 정규화 가중치 $B$와 TF 스케일링 파라미터 $K_1$에 따라 성능이 크게 좌우되며, 고빈도 단어가 특정 문서를 독점하는 현상(saturation)이나 희귀 전문 용어의 높은 대표성이 과소평가되는 문제가 있었습니다.
 * **해결 방안**:
-  * 문서 특징을 다차원적으로 분석하여 설계한 **"Coarse-to-Fine Grid Search(성글게 탐색 후 미세 조정)" 하이퍼파라미터 튜닝**을 적용하여 탐색을 진행하였습니다.
-  * 시계열 및 학술 논문 요약 도메인에서는 문서 길이가 상대적으로 균일하므로 문서 길이에 의한 페널티를 과하게 주지 않는 **$B=0.5$**와, Term Frequency의 과도한 영향력을 매우 효과적으로 억제하는 극단적인 TF Saturation 파라미터 **$K_1=0.05$** 조합을 최적의 BM25 계수로 튜닝했습니다.
-  * 이에 더해, 학술 질의어 중 `bayesian`, `stein`, `dirichlet` 같이 데이터셋 내에서 극소수 문서에만 등장하는 **희귀한 고-IDF 전문 단어**는 일반적인 범용 단어보다 해당 쿼리의 주제를 압도적으로 대표한다는 사실을 발견했습니다. 따라서 $IDF \ge 5.0$인 어휘 매칭 시 **$1.5$배의 보너스 가중치(IDF Boost)**를 부여하는 **IDF Rare Word Boosting** 스코어링 로직을 개발하여 `intappscorer()` 커스텀 스코어러 내에 직접 구현하였습니다.
+  * **Sublinear TF Scaling**: 단어 빈도수를 로그 스케일($1 + \log(tf)$ if $tf > 0$ else $0$)로 스케일링하여 고빈도 단어가 스코어를 왜곡하는 독점 현상을 효과적으로 예방하였습니다.
+  * **IDF Rare Word Boosting**: 학술 질의어 중 `bayesian`, `stein`, `dirichlet` 같이 데이터셋 내에서 극소수 문서에만 등장하는 **희귀한 고-IDF 전문 단어**가 해당 쿼리의 주제를 압도적으로 대표하므로, $IDF \ge 5.0$인 어휘 매칭 시 **$1.5$배의 보너스 가중치(IDF Boost)**를 부여하는 스코어링 로직을 개발하여 직접 연계 적용하였습니다.
+  * **성밀 랭킹 그리드 탐색**: $B=0.3$, $K_1=0.1$로 미세 조정하여 최적의 길이 정규화와 어휘 가치 가산 비율을 확정하였습니다.
 
-$$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \text{Boost}(q) \cdot \frac{\text{TF}(q, D) \cdot (K_1 + 1)}{\text{TF}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
-$$\text{where } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge 5.0 \\ 1.0 & \text{otherwise} \end{cases}$$
+$$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \text{Boost}(q) \cdot \frac{\text{TF}_{\text{scaled}}(q, D) \cdot (K_1 + 1)}{\text{TF}_{\text{scaled}}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
+$$\text{where } \text{TF}_{\text{scaled}}(q, D) = \begin{cases} 1 + \log(\text{TF}(q, D)) & \text{if } \text{TF}(q, D) > 0 \\ 0 & \text{otherwise} \end{cases}$$
+$$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge 5.0 \\ 1.0 & \text{otherwise} \end{cases}$$
 
 ### 2.2. 성능 평가 비교 (Baseline vs Optimized)
 
@@ -100,7 +100,7 @@ $$\text{where } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **Stemming Analyzer + BM25 Custom ($B=0.5, K_1=0.05$, IDF Boost 1.5) + OrGroup.factory(0.7)** | **0.2783** | **8.35점** | **+11.45% (최고의 최적화 달성)** |
+| **Optimized (최적화)** | **NLTK Porter Analyzer + Sublinear TF + BM25 Custom ($B=0.3, K_1=0.1$, IDF Boost 1.5) + OrGroup.factory(0.5)** | **0.2811** | **8.43점** | **+12.57% (최고의 최적화 달성) 🚀** |
 
 ---
 

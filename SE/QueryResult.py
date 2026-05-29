@@ -1,11 +1,11 @@
 import whoosh.index as index
 from whoosh.qparser import QueryParser, OrGroup
-from whoosh import scoring
 import CustomScoring as scoring
 from nltk.corpus import stopwords
+from se_analyzer import NLTKPorterFilter, get_porter_analyzer
 
 
-def getSearchEngineResult(query_dict, custom_param=1.0, or_group_factor=0.7, extra_stopwords=None):
+def getSearchEngineResult(query_dict, custom_param=(0.3, 0.1, 5.0, 1.5), or_group_factor=0.5, extra_stopwords=None):
     """
     질의어 딕셔너리를 받아 검색 결과를 반환한다.
     - query_dict: {queryID: query_text, ...}

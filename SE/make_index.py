@@ -5,9 +5,9 @@
 import os.path
 from whoosh.index import create_in
 from whoosh.fields import Schema, TEXT, NUMERIC
-from whoosh.analysis import StemmingAnalyzer
+from se_analyzer import NLTKPorterFilter, get_porter_analyzer
 
-schema = Schema(docID=NUMERIC(stored=True), contents=TEXT(analyzer=StemmingAnalyzer()))
+schema = Schema(docID=NUMERIC(stored=True), contents=TEXT(analyzer=get_porter_analyzer()))
 index_dir = "index"
 
 if not os.path.exists(index_dir):
