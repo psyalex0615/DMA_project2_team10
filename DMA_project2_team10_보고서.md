@@ -87,9 +87,11 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
   * BM25 스코어링 공식은 문서 길이 정규화 가중치 $B$와 TF 스케일링 파라미터 $K_1$에 따라 성능이 크게 좌우됩니다.
 * **해결 방안**:
   * 문서 특징을 다차원적으로 분석하여 설계한 **"Coarse-to-Fine Grid Search(성글게 탐색 후 미세 조정)" 하이퍼파라미터 튜닝**을 적용하여 탐색을 진행하였습니다.
-  * 시계열 및 학술 논문 요약 도메인에서는 문서 길이가 상대적으로 균일하므로 문서 길이에 의한 페널티를 과하게 주지 않는 **$B=0.5$**와, Term Frequency의 과도한 영향력을 매우 효과적으로 억제하는 극단적인 TF Saturation 파라미터 **$K_1=0.1$** 조합이 최적의 BPREF 성능을 발휘함을 검증하고 이를 `intappscorer()` 커스텀 스코어러 내에 직접 구현하였습니다.
+  * 시계열 및 학술 논문 요약 도메인에서는 문서 길이가 상대적으로 균일하므로 문서 길이에 의한 페널티를 과하게 주지 않는 **$B=0.5$**와, Term Frequency의 과도한 영향력을 매우 효과적으로 억제하는 극단적인 TF Saturation 파라미터 **$K_1=0.05$** 조합을 최적의 BM25 계수로 튜닝했습니다.
+  * 이에 더해, 학술 질의어 중 `bayesian`, `stein`, `dirichlet` 같이 데이터셋 내에서 극소수 문서에만 등장하는 **희귀한 고-IDF 전문 단어**는 일반적인 범용 단어보다 해당 쿼리의 주제를 압도적으로 대표한다는 사실을 발견했습니다. 따라서 $IDF \ge 5.0$인 어휘 매칭 시 **$1.5$배의 보너스 가중치(IDF Boost)**를 부여하는 **IDF Rare Word Boosting** 스코어링 로직을 개발하여 `intappscorer()` 커스텀 스코어러 내에 직접 구현하였습니다.
 
-$$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \frac{\text{TF}(q, D) \cdot (K_1 + 1)}{\text{TF}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
+$$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \text{Boost}(q) \cdot \frac{\text{TF}(q, D) \cdot (K_1 + 1)}{\text{TF}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
+$$\text{where } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge 5.0 \\ 1.0 & \text{otherwise} \end{cases}$$
 
 ### 2.2. 성능 평가 비교 (Baseline vs Optimized)
 
@@ -98,7 +100,7 @@ $$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \frac{\text{TF}(q, D) 
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **Stemming Analyzer + BM25 Custom ($B=0.5, K_1=0.1$) + OrGroup.factory(0.85)** | **0.2776** | **8.33점** | **+11.17% (최고의 최적화 달성)** |
+| **Optimized (최적화)** | **Stemming Analyzer + BM25 Custom ($B=0.5, K_1=0.05$, IDF Boost 1.5) + OrGroup.factory(0.7)** | **0.2783** | **8.35점** | **+11.45% (최고의 최적화 달성)** |
 
 ---
 
@@ -196,7 +198,7 @@ GridSearchCV(5-Fold Cross Validation) 기법을 활용하여 최적의 초매개
    * `DMA_project2_team01_part1_association.pkl`: 향상도 2.0 이상 기준으로 정렬된 최종 연관 분석 규칙 DataFrame.
 2. **Part II (SE 폴더)**:
    * `make_index.py`: 형태소 분석기 `StemmingAnalyzer()`를 주입하여 문서를 어간 인덱스화하는 모듈.
-   * `CustomScoring.py`: B=0.5, K1=0.1 BM25 알고리즘이 완벽히 내재된 커스텀 `intappscorer()` 구현물.
+   * `CustomScoring.py`: B=0.5, K1=0.05 및 IDF Boost 1.5 기법이 완벽히 내재된 커스텀 `intappscorer()` 구현물.
    * `QueryResult.py`: 질의어의 불용어 정제, 형태소 맵핑 및 가중 쿼리 파서가 설정된 검색 반환 엔진.
    * `index/` 폴더: 위 make_index를 실행하여 완성된 형태소 역색인 파일 보관 폴더.
 3. **Part III (CL 폴더)**:
