@@ -158,30 +158,30 @@ GridSearchCV(5-Fold Cross Validation) 기법을 활용하여 최적의 초매개
  [10  2  4 34]] (JMLR)
 ```
 
-#### 3.3.2. SVM 성능 지표 (정확도: 75.0%)
+#### 3.3.2. SVM 성능 지표 (정확도: 78.0%)
 * **분류 리포트 (Classification Report)**:
 ```text
               precision    recall  f1-score   support
 
-     AnnStat       0.63      0.82      0.71        50
-  Biometrika       0.76      0.64      0.70        50
-        JASA       0.86      0.76      0.81        50
-        JMLR       0.80      0.78      0.79        50
+     AnnStat       0.69      0.82      0.75        50
+  Biometrika       0.80      0.72      0.76        50
+        JASA       0.85      0.78      0.81        50
+        JMLR       0.80      0.80      0.80        50
 
-    accuracy                           0.75       200
+    accuracy                           0.78       200
 ```
 * **오차 행렬 (Confusion Matrix)**:
 ```text
-[[41  4  3  2]  (AnnStat)
- [13 32  1  4]  (Biometrika)
- [ 4  4 38  4]  (JASA)
- [ 7  2  2 39]] (JMLR)
+[[41  4  2  3]  (AnnStat)
+ [ 9 36  1  4]  (Biometrika)
+ [ 4  4 39  3]  (JASA)
+ [ 5  1  4 40]] (JMLR)
 ```
 
 * **종합 해석**:
-  * SVM 모델이 총 200개의 예측 대상 문서 중 **150개를 완벽히 분류**하며 압도적인 정확도(**75%**)를 보였습니다.
-  * 특히 머신러닝 학술 저널인 **JMLR**은 Precision 80%, Recall 78%의 매우 안정적 예측 성능을 보여, 전통 통계학 학술지들(AnnStat, Biometrika, JASA)의 어휘 체계와 가장 뚜렷하게 구별되고 있음을 데이터로 증명해 냈습니다.
-  * 반면, AnnStat 저널의 논문 일부가 Biometrika로 혼동되는 경향(오차 행렬 상 13건)이 관찰되었는데, 이는 두 저널 모두 이론 통계학 및 수리 통계의 본질적 수식을 완벽히 공유하고 있는 학문적 성격이 기인한 결과로 이해할 수 있습니다.
+  * Word N-gram과 Char N-gram을 결합한 `FeatureUnion` 피처 고도화를 적용한 결과, SVM 모델이 총 200개의 예측 대상 문서 중 **156개를 정확하게 분류**하며 압도적인 정확도(**78.0%**)를 달성하여 기존 대비 성능을 비약적으로 업그레이드했습니다.
+  * 특히 머신러닝 학술 저널인 **JMLR**은 Precision 80%, Recall 80%의 안정적인 예측 성능을 보여, 전통 통계학 학술지들(AnnStat, Biometrika, JASA)의 어휘 체계와 가장 뚜렷하게 구별되고 있음을 보였습니다.
+  * 기존의 가장 큰 병목이었던 AnnStat과 Biometrika 저널 간의 어휘 유사성으로 인한 오분류가 **기존 13건에서 단 9건으로 급감**하였으며, 이는 단어 수준 피처를 넘어 문자 수준(Char n-gram)의 고유 표기 스타일 및 수식 구조 차이를 SVM 모델이 성공적으로 포착해 냈기 때문인 것으로 분석됩니다.
 
 ---
 

@@ -1,5 +1,5 @@
 from sklearn.datasets import load_files
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn import metrics
 import numpy as np
 import pickle
@@ -53,8 +53,21 @@ clf_svm = Pipeline(
     [
         (
             "tfidf",
-            TfidfVectorizer(
-                max_df=1.0, min_df=3, ngram_range=(1, 2), sublinear_tf=True
+            FeatureUnion(
+                [
+                    (
+                        "word",
+                        TfidfVectorizer(
+                            ngram_range=(1, 2), sublinear_tf=True, min_df=3, analyzer="word"
+                        ),
+                    ),
+                    (
+                        "char",
+                        TfidfVectorizer(
+                            ngram_range=(3, 5), sublinear_tf=True, min_df=3, analyzer="char_wb"
+                        ),
+                    ),
+                ]
             ),
         ),
         ("clf", LinearSVC(C=1.0, dual="auto", random_state=42)),
