@@ -81,6 +81,19 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
 * **해결 방안 (`QueryResult.py` 개선)**:
   * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.4)`** 파서를 설정하여, 다수의 질의어 단어가 골고루 분포되어 매칭된 고밀도 관련 문서가 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 강력하게 우선 순위를 갖도록 조정하였습니다.
 
+#### 2.1.4. 구절 순서 매칭 가중치 기반 Two-Stage 재정렬 (Phrase Order Boosting Re-ranking)
+* **분석 및 문제 인식**:
+  * BM25F 및 기본 색인 기법들은 기본적으로 질의어의 단어들을 독립 사건(Bag-of-Words)으로 취급합니다.
+  * 예를 들어, 질의어가 "deep learning"일 때 "deep"과 "learning"이 서로 무관하게 먼 문단에 떨어져 등장하는 문서가, "deep learning"이라는 구절이 붙어 등장하는 핵심 문서보다 단어 통계에 의해 동등하거나 더 높은 점수를 받는 **구절 시맨틱 왜곡 현상**이 빈번하게 일어납니다.
+  * 단, 1차 검색 단계부터 SpanQuery나 PhraseQuery 같은 엄격한 구절 인접도 필터링을 걸면, 유효한 다른 형태소 문서들이 극단적으로 차단되어 미검출율(False Negative)이 치솟고 BPREF 점수가 폭락하는 부작용(`0.2468`)이 있었습니다.
+* **해결 방안 (`QueryResult.py` 개선 - Two-Stage 설계)**:
+  * **온메모리 말뭉치 파싱 및 구절 추출**: 1차 검색 결과는 우리의 고도화된 BM25 Custom 공식(Sublinear TF + IDF Boost + Porter Stemmer)으로 높은 재현율(Recall)을 가지고 후보군을 수집합니다.
+  * **구절 순서 가산점 매칭 (Phrase Order Boosting)**: 쿼리에서 불용어를 통제한 뒤 인접한 2단어(Bigram), 3단어(Trigram) 및 전체 쿼리 문자열 구절을 동적으로 추출합니다. 1차 검색된 문서들의 원본 텍스트에 이 구절들이 **정확한 순서대로 연속해 등장**할 경우, 등장 횟수당 **`0.12`**의 가산점(Additive Boost)을 실시간으로 기존 BM25 점수에 결합하여 재정렬(Re-ranking)을 수행하는 최첨단 하이브리드 엔진을 개발했습니다.
+  * **채점 안정성 확보 (Graceful Fallback)**: 채점기 서버의 파일 디렉토리 불일치나 `document.txt` 로드 실패가 일어날 경우를 대비하여 예외 처리를 철저하게 구성, 로드 실패 시 자동으로 Re-ranking 레이어가 투명하게 바이패스(Bypass)되어 정상적인 1차 고도화 BM25 검색 결과가 반환되도록 **이중 예방 설계**를 구현했습니다.
+
+$$\text{Score}_{\text{final}}(D, Q) = \text{Score}_{\text{BM25\_Custom}}(D, Q) + \text{Phrase\_Matches}(D, Q) \cdot 0.12$$
+$$\text{where } \text{Phrase\_Matches}(D, Q) = \sum_{p \in \text{Phrases}(Q)} \mathbb{I}(p \subset \text{Text}(D))$$
+
 #### 2.1.3. 스코어링 함수 튜닝 및 최적화: Sublinear TF + IDF Boost + BM25 조합 (`CustomScoring.py` 개선)
 * **분석 및 문제 인식**:
   * BM25 스코어링 공식은 문서 길이 정규화 가중치 $B$와 TF 스케일링 파라미터 $K_1$에 따라 성능이 크게 좌우되며, 고빈도 단어가 특정 문서를 독점하는 현상(saturation)이나 희귀 전문 용어의 높은 대표성이 과소평가되는 문제가 있었습니다.
@@ -100,7 +113,7 @@ $$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **NLTK Porter Analyzer + Sublinear TF + BM25 Custom ($B=0.35, K_1=0.08$, IDF Boost 1.5) + OrGroup.factory(0.4)** | **0.2824** | **8.47점** | **+13.09% (최고의 최적화 달성) 🚀** |
+| **Optimized (최적화)** | **NLTK Porter + Sublinear TF + BM25 Custom ($B=0.35, K_1=0.08$, IDF Boost 1.5) + OrGroup(0.4) + 구절 순서 재정렬 (Phrase Boost 0.12)** | **0.2904** | **8.71점** | **+16.30% (최고의 최적화 달성) 🚀** |
 
 ### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
 
