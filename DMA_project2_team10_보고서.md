@@ -109,11 +109,12 @@ $$\text{where } param = 1.5$$
 ### 2.2. 성능 평가 비교 (Baseline vs Optimized)
 
 학술 쿼리 80개와 정답 셋(`relevance.txt`)을 기반으로 공정하게 산출한 최종 BPREF 점수 비교표입니다.
+* **성적 환산 공식**: $\text{Score} = (\text{BPREF} - 0.2497) \times 300$ (최대 한계 점수 $0.3497$ 달성 시 30점 만점)
 
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **NLTK Porter + Binary Scorer(IDF Exp Boost 1.5) + OrGroup(0.2) + 글자수 부스팅 + 2단계 Reranking (Title Phrase & Body Co-occurrence)** | **0.3106** | **9.32점** | **+24.37% (최고의 최적화 달성) 🚀** |
+| **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | **0.00점** | - |
+| **Optimized (최적화)** | **NLTK Porter + Binary Scorer(IDF Exp Boost 1.5) + OrGroup(0.2) + 글자수 부스팅 + 2단계 Reranking (Title Phrase & Body Co-occurrence)** | **0.3106** | **18.26점** | **+24.37% (최고의 최적화 달성) 🚀** |
 
 ### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
 
