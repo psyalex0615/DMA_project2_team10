@@ -11,7 +11,7 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
 * **수행 내용 (R1-1)**:
   * 총 117,656개의 질문-태그 레코드를 가진 원본 데이터셋을 Pandas를 통해 로드하였습니다. (고유 질문 수: 42,921개, 고유 태그 수: 1,032개)
   * `pd.crosstab`을 활용하여 각 질문 ID를 인덱스(index)로 하고 고유 태그 이름을 열(column)로 가지는 크기 $(42,921 \times 1,032)$의 원-핫 인코딩 수평 테이블을 생성하였습니다.
-  * 메모리 사용량 최소화와 `mlxtend` 라이브러리와의 호환성을 보장하기 위해 데이터 타입을 `bool` 형식으로 변환한 뒤 `DMA_project2_team01_part1_horizontal.pkl` 파일로 저장 완료하였습니다.
+  * 메모리 사용량 최소화와 `mlxtend` 라이브러리와의 호환성을 보장하기 위해 데이터 타입을 `bool` 형식으로 변환한 뒤 `DMA_project2_team10_part1_horizontal.pkl` 파일로 저장 완료하였습니다.
 
 ### 1.2. 빈번 아이템셋 및 연관 규칙 도출 (R1-2)
 * **분석 기준**:
@@ -87,24 +87,24 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
   * 예를 들어, 질의어가 "deep learning"일 때 "deep"과 "learning"이 서로 무관하게 먼 문단에 떨어져 등장하는 문서가, "deep learning"이라는 구절이 붙어 등장하는 핵심 문서보다 단어 통계에 의해 동등하거나 더 높은 점수를 받는 **구절 시맨틱 왜곡 현상**이 빈번하게 일어납니다.
   * 단, 1차 검색 단계부터 SpanQuery나 PhraseQuery 같은 엄격한 구절 인접도 필터링을 걸면, 유효한 다른 형태소 문서들이 극단적으로 차단되어 미검출율(False Negative)이 치솟고 BPREF 점수가 폭락하는 부작용(`0.2468`)이 있었습니다.
 * **해결 방안 (`QueryResult.py` 개선 - Two-Stage 설계)**:
-  * **온메모리 말뭉치 파싱 및 구절 추출**: 1차 검색 결과는 우리의 고도화된 BM25 Custom 공식(Sublinear TF + IDF Boost + Porter Stemmer)으로 높은 재현율(Recall)을 가지고 후보군을 수집합니다.
-  * **구절 순서 가산점 매칭 (Phrase Order Boosting)**: 쿼리에서 불용어를 통제한 뒤 인접한 2단어(Bigram), 3단어(Trigram) 및 전체 쿼리 문자열 구절을 동적으로 추출합니다. 1차 검색된 문서들의 원본 텍스트에 이 구절들이 **정확한 순서대로 연속해 등장**할 경우, 등장 횟수당 **`0.12`**의 가산점(Additive Boost)을 실시간으로 기존 BM25 점수에 결합하여 재정렬(Re-ranking)을 수행하는 최첨단 하이브리드 엔진을 개발했습니다.
-  * **채점 안정성 확보 (Graceful Fallback)**: 채점기 서버의 파일 디렉토리 불일치나 `document.txt` 로드 실패가 일어날 경우를 대비하여 예외 처리를 철저하게 구성, 로드 실패 시 자동으로 Re-ranking 레이어가 투명하게 바이패스(Bypass)되어 정상적인 1차 고도화 BM25 검색 결과가 반환되도록 **이중 예방 설계**를 구현했습니다.
+  * **온메모리 말뭉치 파싱 및 형태소 캐싱**: 1차 검색 속도를 단축하고 Reranking 계산을 최적화하기 위해, 문서 전체의 텍스트와 제목을 형태소(Stemmed) 단위로 메모리에 캐싱하여 온메모리 비교 구조를 구축했습니다.
+  * **제목 내 정확한 구절 매칭 (Title Phrase Boost)**: 논문의 제목(Title)에 쿼리의 표준 불용어가 제거된 온전한 구절이 **정확한 순서대로 연속해 등장**할 경우, 전체 스코어에 **2배의 부스팅(Multiplicative Boost)**을 가산 결합합니다 (`boost_multiplier = 2.0`).
+  * **본문 형태소 동시 출현도 (Body Co-occurrence Boost)**: 본문(Body)에 쿼리 내 유효 어휘들의 형태소(Stemmed Words)가 공존하는 비율을 계산하여, $\text{body\_co\_boost} = 1.0 + 0.5 \times (\text{body\_ratio}^2)$ 가중치를 적용합니다. 이를 통해 단순히 하나의 키워드가 많이 나온 문서보다 쿼리의 여러 어휘가 다양하게 본문에 공존하는 관련성이 높은 문서를 대폭 우대합니다.
+  * **채점 안정성 확보 (Graceful Fallback)**: 채점기 서버의 파일 디렉토리 불일치나 `document.txt` 로드 실패가 일어날 경우를 대비하여 예외 처리를 철저하게 구성, 로드 실패 시 자동으로 Re-ranking 레이어가 투명하게 바이패스(Bypass)되어 정상적인 1차 검색 결과가 반환되도록 **이중 예방 설계**를 구현했습니다.
 
-$$\text{Score}_{\text{final}}(D, Q) = \text{Score}_{\text{BM25\_Custom}}(D, Q) + \text{Phrase\_Matches}(D, Q) \cdot 0.12$$
-$$\text{where } \text{Phrase\_Matches}(D, Q) = \sum_{p \in \text{Phrases}(Q)} \mathbb{I}(p \subset \text{Text}(D))$$
+$$\text{Score}_{\text{final}}(D, Q) = \text{Score}_{\text{1st}}(D, Q) \cdot (1.0 + 0.5 \cdot \text{Body\_Ratio}^2) \cdot (1.0 + \text{Title\_Phrase\_Match})$$
+$$\text{where } \text{Title\_Phrase\_Match} = \begin{cases} 1.0 & \text{if } Q_{\text{phrase\_stemmed}} \subset \text{Title}_{\text{phrase\_stemmed}}(D) \\ 0.0 & \text{otherwise} \end{cases}$$
+$$\text{and } \text{Body\_Ratio} = \frac{|Q_{\text{words\_stemmed}} \cap D_{\text{bodies\_stemmed}}|}{|Q_{\text{words\_stemmed}}|}$$
 
-#### 2.1.3. 스코어링 함수 튜닝 및 최적화: Sublinear TF + IDF Boost + BM25 조합 (`CustomScoring.py` 개선)
+#### 2.1.3. 스코어링 함수 튜닝 및 최적화: Binary Match 기반 IDF Exponential Boosting (`CustomScoring.py` 개선)
 * **분석 및 문제 인식**:
-  * BM25 스코어링 공식은 문서 길이 정규화 가중치 $B$와 TF 스케일링 파라미터 $K_1$에 따라 성능이 크게 좌우되며, 고빈도 단어가 특정 문서를 독점하는 현상(saturation)이나 희귀 전문 용어의 높은 대표성이 과소평가되는 문제가 있었습니다.
+  * BM25 공식은 문서 길이 및 용어 빈도(TF)에 의해 스코어가 왜곡되는 경향이 있습니다. 학술 문서 검색의 특성상 문서 길이나 키워드의 단순 반복 횟수보다는, 쿼리의 핵심 키워드가 문서 내에 존재(Match)하는지 여부와 그 단어가 얼마나 정보량이 큰지(IDF)가 매칭의 핵심 척도가 되어야 노이즈가 최소화됩니다.
 * **해결 방안**:
-  * **Sublinear TF Scaling**: 단어 빈도수를 로그 스케일($1 + \log(tf)$ if $tf > 0$ else $0$)로 스케일링하여 고빈도 단어가 스코어를 왜곡하는 독점 현상을 효과적으로 예방하였습니다.
-  * **IDF Rare Word Boosting**: 학술 질의어 중 `bayesian`, `stein`, `dirichlet` 같이 데이터셋 내에서 극소수 문서에만 등장하는 **희귀한 고-IDF 전문 단어**가 해당 쿼리의 주제를 압도적으로 대표하므로, $IDF \ge 5.0$인 어휘 매칭 시 **$1.5$배의 보너스 가중치(IDF Boost)**를 부여하는 스코어링 로직을 개발하여 직접 연계 적용하였습니다.
-  * **성밀 랭킹 그리드 탐색**: $B=0.35$, $K_1=0.08$로 미세 조정하여 최적의 길이 정규화와 어휘 가치 가산 비율을 확정하였습니다.
+  * **Binary TF & Length Normalization 무력화 ($K_1=0.0$)**: 단어 빈도(TF)와 문서 길이 패널티($B$)를 완전히 무력화하여, 단어가 문서 내에 단순히 등장하였는지 여부(Binary Match)로만 베이스 스코어를 산정하였습니다.
+  * **IDF 지수 승수 부스팅 (Exponential Boosting)**: 단순히 IDF를 곱하는 것을 넘어, 희귀 학술 전문 용어 매칭 시 가중치가 기하급수적으로 폭발하도록 IDF에 지수 가중치 $param=1.5$를 부여하였습니다. 즉, 각 용어의 최종 기여도는 $IDF \times IDF^{1.5} = IDF^{2.5}$가 되어 희귀 단어를 포함한 문서를 최우선적으로 상위에 랭크시킵니다.
 
-$$\text{Score}(D, Q) = \sum_{q \in Q} \text{IDF}(q) \cdot \text{Boost}(q) \cdot \frac{\text{TF}_{\text{scaled}}(q, D) \cdot (K_1 + 1)}{\text{TF}_{\text{scaled}}(q, D) + K_1 \cdot \left( (1 - B) + B \cdot \frac{\text{Length}(D)}{\text{AvgLength}} \right)}$$
-$$\text{where } \text{TF}_{\text{scaled}}(q, D) = \begin{cases} 1 + \log(\text{TF}(q, D)) & \text{if } \text{TF}(q, D) > 0 \\ 0 & \text{otherwise} \end{cases}$$
-$$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge 5.0 \\ 1.0 & \text{otherwise} \end{cases}$$
+$$\text{Score}(D, Q) = \sum_{q \in Q \cap D} \text{IDF}(q) \cdot \text{IDF}(q)^{param}$$
+$$\text{where } param = 1.5$$
 
 ### 2.2. 성능 평가 비교 (Baseline vs Optimized)
 
@@ -113,7 +113,7 @@ $$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge
 | 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | 7.49점 | - |
-| **Optimized (최적화)** | **NLTK Porter + Sublinear TF + BM25 Custom ($B=0.35, K_1=0.08$, IDF Boost 1.5) + OrGroup(0.4) + 구절 순서 재정렬 (Phrase Boost 0.12)** | **0.2904** | **8.71점** | **+16.30% (최고의 최적화 달성) 🚀** |
+| **Optimized (최적화)** | **NLTK Porter + Binary Scorer(IDF Exp Boost 1.5) + OrGroup(0.2) + 글자수 부스팅 + 2단계 Reranking (Title Phrase & Body Co-occurrence)** | **0.3106** | **9.32점** | **+24.37% (최고의 최적화 달성) 🚀** |
 
 ### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
 
@@ -236,22 +236,22 @@ weighted avg       0.80      0.79      0.79       200
 
 ## 4. 최종 프로젝트 파일 및 실행 가이드
 
-모든 프로젝트의 코드 및 산출물 파일은 요구사항의 명세 규칙(팀 번호 `01` 기준)에 맞춰 완벽히 구성 및 배포되었습니다. 
+모든 프로젝트의 코드 및 산출물 파일은 요구사항의 명세 규칙(팀 번호 `10` 기준)에 맞춰 완벽히 구성 및 배포되었습니다. 
 
 ### 4.1. 배포된 최종 파일 리스트
 1. **Part I (AA 폴더)**:
    * `part1.py`: 수평 테이블 및 연관 규칙의 완벽한 재현성 스크립트.
-   * `DMA_project2_team01_part1_horizontal.pkl`: 피클링된 질문-태그 boolean 2차원 수평 DataFrame.
-   * `DMA_project2_team01_part1_association.pkl`: 향상도 2.0 이상 기준으로 정렬된 최종 연관 분석 규칙 DataFrame.
+   * `DMA_project2_team10_part1_horizontal.pkl`: 피클링된 질문-태그 boolean 2차원 수평 DataFrame.
+   * `DMA_project2_team10_part1_association.pkl`: 향상도 2.0 이상 기준으로 정렬된 최종 연관 분석 규칙 DataFrame.
 2. **Part II (SE 폴더)**:
    * `make_index.py`: 형태소 분석기 `StemmingAnalyzer()`를 주입하여 문서를 어간 인덱스화하는 모듈.
-   * `CustomScoring.py`: B=0.5, K1=0.05 및 IDF Boost 1.5 기법이 완벽히 내재된 커스텀 `intappscorer()` 구현물.
-   * `QueryResult.py`: 질의어의 불용어 정제, 형태소 맵핑 및 가중 쿼리 파서가 설정된 검색 반환 엔진.
+   * `CustomScoring.py`: Binary Match 스코어러 및 IDF Exponent 1.5 기법이 완벽히 내재된 커스텀 `intappscorer()` 구현물.
+   * `QueryResult.py`: 질의어 정제, 형태소 캐싱, 제목 구절 부스팅 & 본문 형태소 동시 출현 2차 재정렬 파서 엔진.
    * `index/` 폴더: 위 make_index를 실행하여 완성된 형태소 역색인 파일 보관 폴더.
 3. **Part III (CL 폴더)**:
    * `clasification.py`: Naive Bayes 및 SVM 최적 모델을 데이터에 학습시키고 저장하는 전체 파이프라인.
-   * `DMA_project2_team01_nb.pkl`: 학습 완료된 Naive Bayes 파이프라인 직렬화(Pickle) 바이너리.
-   * `DMA_project2_team01_svm.pkl`: 학습 완료된 선형 SVM 파이프라인 직렬화(Pickle) 바이너리.
+   * `DMA_project2_team10_nb.pkl`: 학습 완료된 ComplementNB 파이프라인 직렬화(Pickle) 바이너리.
+   * `DMA_project2_team10_svm.pkl`: 학습 완료된 선형 SVM 파이프라인 직렬화(Pickle) 바이너리.
 
 ### 4.2. 실행 방법 및 결과 재현 가이드
 터미널에서 각 프로젝트 폴더로 이동하여 간단히 스크립트를 독립 실행함으로써 재현 평가를 할 수 있습니다.
