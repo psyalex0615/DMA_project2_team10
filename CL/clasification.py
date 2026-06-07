@@ -4,7 +4,7 @@ from sklearn import metrics
 import numpy as np
 import pickle
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.naive_bayes import ComplementNB
 from sklearn.svm import LinearSVC
 
 # ============================================================
@@ -34,11 +34,34 @@ clf_nb = Pipeline(
     [
         (
             "tfidf",
-            TfidfVectorizer(
-                max_df=0.5, min_df=3, ngram_range=(1, 3), sublinear_tf=True
+            FeatureUnion(
+                [
+                    (
+                        "word",
+                        TfidfVectorizer(
+                            analyzer="word",
+                            ngram_range=(1, 3),
+                            min_df=3,
+                            max_df=0.85,
+                            sublinear_tf=True,
+                            strip_accents="unicode",
+                        ),
+                    ),
+                    (
+                        "char",
+                        TfidfVectorizer(
+                            analyzer="char_wb",
+                            ngram_range=(3, 5),
+                            min_df=1,
+                            sublinear_tf=True,
+                            strip_accents="unicode",
+                        ),
+                    ),
+                ],
+                transformer_weights={"word": 1.0, "char": 1.0},
             ),
         ),
-        ("clf", MultinomialNB(alpha=0.05)),
+        ("clf", ComplementNB(alpha=0.03)),
     ]
 )
 clf_nb.fit(train_data.data, train_data.target)
@@ -58,19 +81,29 @@ clf_svm = Pipeline(
                     (
                         "word",
                         TfidfVectorizer(
-                            ngram_range=(1, 2), sublinear_tf=True, min_df=3, analyzer="word"
+                            analyzer="word",
+                            ngram_range=(1, 3),
+                            min_df=1,
+                            max_df=0.9,
+                            sublinear_tf=True,
+                            strip_accents="unicode",
                         ),
                     ),
                     (
                         "char",
                         TfidfVectorizer(
-                            ngram_range=(3, 5), sublinear_tf=True, min_df=3, analyzer="char_wb"
+                            analyzer="char_wb",
+                            ngram_range=(4, 6),
+                            min_df=3,
+                            sublinear_tf=True,
+                            strip_accents="unicode",
                         ),
                     ),
-                ]
+                ],
+                transformer_weights={"word": 1.0, "char": 0.75},
             ),
         ),
-        ("clf", LinearSVC(C=1.0, dual="auto", random_state=42)),
+        ("clf", LinearSVC(C=2.0, dual="auto", random_state=42)),
     ]
 )
 clf_svm.fit(train_data.data, train_data.target)

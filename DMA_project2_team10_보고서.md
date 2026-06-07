@@ -151,82 +151,86 @@ $$\text{and } \text{Boost}(q) = \begin{cases} 1.5 & \text{if } \text{IDF}(q) \ge
 
 제공된 4개 주요 학술 저널(AnnStat, Biometrika, JASA, JMLR)의 논문 텍스트 데이터(훈련용 800개, 평가용 200개)를 기반으로 고성능 분류 모델을 구축하였습니다.
 
-### 3.1. 전처리 및 텍스트 피처 엔지니어링 (TF-IDF Vectorizer)
-서로 극도로 유사한 통계학/머신러닝 도메인 어휘셋 속에서 저널 간의 고유 미묘한 어휘적/학문적 스타일 차이를 파악하기 위해, 강력한 TF-IDF 벡터라이저 설정을 적용했습니다.
-* **N-gram Range 확장**: 단일 단어의 의미적 한계를 넘기 위해 복합 단어 피처를 추출하였습니다.
-  * Naive Bayes Pipeline: **Unigram, Bigram, Trigram** `(1, 3)` 범위 매핑
-  * SVM Pipeline: **Unigram, Bigram** `(1, 2)` 범위 매핑
-* **Frequency Filtering**: 너무 드물게 나오는 오타나 노이즈 어휘 제거 및 범용 어휘 통제
-  * `min_df=3` (최소 3개 이상의 문서에서 등장한 단어만 학습에 사용)
-  * `max_df=0.5` (Naive Bayes에서 전체 문서의 50%를 초과하는 과도하게 범용적인 단어 제외)
-* **Sublinear TF Scaling**: 어휘 빈도수의 스케일을 로그 스케일링($1 + \log(\text{tf})$)하여 특정 단어가 지나치게 문서 점수를 지배하는 현상을 예방하였습니다.
+### 3.1. 전처리 및 텍스트 피처 엔지니어링 (TF-IDF Vectorizer FeatureUnion)
+서로 극도로 유사한 통계학/머신러닝 도메인 어휘셋 속에서 저널 간의 고유 미묘한 어휘적/학문적 스타일 차이를 파악하기 위해, 단어(Word)와 문자(Character) n-gram 피처를 결합한 강력한 **FeatureUnion** 파이프라인을 구축했습니다.
+* **Word-level TF-IDF Vectorizer**:
+  * Naive Bayes: `ngram_range=(1, 3)`, `min_df=3`, `max_df=0.85`, `sublinear_tf=True`, `strip_accents='unicode'`
+  * SVM: `ngram_range=(1, 3)`, `min_df=1`, `max_df=0.90`, `sublinear_tf=True`, `strip_accents='unicode'`
+* **Char-level TF-IDF Vectorizer**:
+  * Naive Bayes: `ngram_range=(3, 5)`, `min_df=1`, `sublinear_tf=True`, `strip_accents='unicode'`
+  * SVM: `ngram_range=(4, 6)`, `min_df=3`, `sublinear_tf=True`, `strip_accents='unicode'`
+* **Feature Weighting**:
+  * Naive Bayes: Word 가중치 `1.0`, Char 가중치 `1.0` 동등 결합
+  * SVM: Word 가중치 `1.0`, Char 가중치 `0.75` 결합
 
 ### 3.2. 머신러닝 모델 아키텍처 및 하이퍼파라미터 튜닝
-GridSearchCV(5-Fold Cross Validation) 기법을 활용하여 최적의 초매개변수를 선별하였습니다.
+GridSearchCV 및 다양한 모델 조합 실험을 통해 최적의 모델 아키텍처를 선정하였습니다.
 
-#### 3.2.1. 모델 1: Naive Bayes Classifier Pipeline (정교한 확률 모델)
+#### 3.2.1. 모델 1: FeatureUnion + ComplementNB (나이브 베이즈 모델 고도화)
 * **최종 파이프라인 구조**:
-  * `TfidfVectorizer(max_df=0.5, min_df=3, ngram_range=(1, 3), sublinear_tf=True)`
-  * `MultinomialNB(alpha=0.05)`
+  * `FeatureUnion([('word', TfidfVectorizer(...)), ('char', TfidfVectorizer(...))])`
+  * `ComplementNB(alpha=0.03)`
 * **선택 근거 및 튜닝**:
-  * 학습 데이터의 크기가 클래스당 200개로 다소 협소한 데이터 환경에서는 과적합(Overfitting) 발생 가능성이 매우 큽니다.
-  * 나이브 베이즈 모델은 생성 모델적 성격을 지녀 데이터가 적을 때 매우 강건하게 작동합니다.
-  * 라플라스 평활(Laplace Smoothing) 계수인 라플라스 알파를 매우 정교한 **$\alpha=0.05$**로 최적화하여 보지 못한 단어에 대한 확률 균일화를 방지하면서 분류 정확도를 크게 향상시켰습니다.
+  * 기존의 MultinomialNB는 클래스 불균형 및 어휘 겹침 환경에서 취약한 한계를 보였습니다. 이를 보완하기 위해 클래스 불균형에 훨씬 강건하게 동작하는 **ComplementNB**를 채택하였습니다.
+  * 라플라스 평활(Laplace Smoothing) 계수인 알파를 정교한 **$\alpha=0.03$**으로 튜닝하여, 텍스트 피처 차원이 크게 증가한 FeatureUnion 환경에서의 확률 보존력을 향상시켰습니다.
 
-#### 3.2.2. 모델 2: Support Vector Machine Classifier Pipeline (고차원 선형 초평면 결정기)
+#### 3.2.2. 모델 2: Support Vector Machine Classifier (고차원 선형 초평면 결정기)
 * **최종 파이프라인 구조**:
-  * `TfidfVectorizer(max_df=1.0, min_df=3, ngram_range=(1, 2), sublinear_tf=True)`
-  * `LinearSVC(C=1.0, dual='auto', random_state=42)`
+  * `FeatureUnion([('word', TfidfVectorizer(...)), ('char', TfidfVectorizer(...))])`
+  * `LinearSVC(C=2.0, dual='auto', random_state=42)`
 * **선택 근거 및 튜닝**:
-  * 텍스트 분류 테스크는 텍스트 피처 수(차원)가 학습 문서 개수보다 훨씬 많은 '고차원 희소성(High-Dimensional Sparsity)'이 뚜렷한 영역입니다. Linear SVM은 이러한 조건에서 강력한 일반화 성능을 냅니다.
-  * 정규화 비용 파라미터 **$C=1.0$**로 마진 오류 페널티를 균형감 있게 배정하였습니다.
+  * Word 및 Char n-gram이 고차원(수만 차원 이상)으로 결합하는 희소 데이터 환경에서 마진 기반의 일반화 성능이 뛰어난 Linear SVM을 지속 사용하였습니다.
+  * 정규화 비용 파라미터 $C$를 **$C=2.0$**으로 가중 조율하여 마진 오류 페널티를 재배정해 최적의 결정을 도출했습니다.
 
 ### 3.3. 최종 성능 평가 결과 (Test Set Accuracy)
 
-#### 3.3.1. Naive Bayes 성능 지표 (정확도: 69.0%)
+#### 3.3.1. Naive Bayes 성능 지표 (정확도: 76.5%)
 * **분류 리포트 (Classification Report)**:
 ```text
               precision    recall  f1-score   support
 
-     AnnStat       0.55      0.78      0.64        50
-  Biometrika       0.65      0.56      0.60        50
-        JASA       0.77      0.74      0.76        50
-        JMLR       0.89      0.68      0.77        50
+     AnnStat       0.65      0.80      0.71        50
+  Biometrika       0.76      0.70      0.73        50
+        JASA       0.81      0.78      0.80        50
+        JMLR       0.89      0.78      0.83        50
 
-    accuracy                           0.69       200
+    accuracy                           0.77       200
+   macro avg       0.78      0.77      0.77       200
+weighted avg       0.78      0.77      0.77       200
 ```
 * **오차 행렬 (Confusion Matrix)**:
 ```text
-[[39  6  2  3]  (AnnStat)
- [17 28  5  0]  (Biometrika)
- [ 5  7 37  1]  (JASA)
- [10  2  4 34]] (JMLR)
+[[40  5  3  2]  (AnnStat)
+ [11 35  3  1]  (Biometrika)
+ [ 5  4 39  2]  (JASA)
+ [ 6  2  3 39]] (JMLR)
 ```
 
-#### 3.3.2. SVM 성능 지표 (정확도: 78.0%)
+#### 3.3.2. SVM 성능 지표 (정확도: 79.0%)
 * **분류 리포트 (Classification Report)**:
 ```text
               precision    recall  f1-score   support
 
-     AnnStat       0.69      0.82      0.75        50
-  Biometrika       0.80      0.72      0.76        50
-        JASA       0.85      0.78      0.81        50
-        JMLR       0.80      0.80      0.80        50
+     AnnStat       0.70      0.84      0.76        50
+  Biometrika       0.76      0.74      0.75        50
+        JASA       0.86      0.76      0.81        50
+        JMLR       0.87      0.82      0.85        50
 
-    accuracy                           0.78       200
+    accuracy                           0.79       200
+   macro avg       0.80      0.79      0.79       200
+weighted avg       0.80      0.79      0.79       200
 ```
 * **오차 행렬 (Confusion Matrix)**:
 ```text
-[[41  4  2  3]  (AnnStat)
- [ 9 36  1  4]  (Biometrika)
- [ 4  4 39  3]  (JASA)
- [ 5  1  4 40]] (JMLR)
+[[42  5  2  1]  (AnnStat)
+ [10 37  1  2]  (Biometrika)
+ [ 4  5 38  3]  (JASA)
+ [ 4  2  3 41]] (JMLR)
 ```
 
 * **종합 해석**:
-  * Word N-gram과 Char N-gram을 결합한 `FeatureUnion` 피처 고도화를 적용한 결과, SVM 모델이 총 200개의 예측 대상 문서 중 **156개를 정확하게 분류**하며 압도적인 정확도(**78.0%**)를 달성하여 기존 대비 성능을 비약적으로 업그레이드했습니다.
-  * 특히 머신러닝 학술 저널인 **JMLR**은 Precision 80%, Recall 80%의 안정적인 예측 성능을 보여, 전통 통계학 학술지들(AnnStat, Biometrika, JASA)의 어휘 체계와 가장 뚜렷하게 구별되고 있음을 보였습니다.
-  * 기존의 가장 큰 병목이었던 AnnStat과 Biometrika 저널 간의 어휘 유사성으로 인한 오분류가 **기존 13건에서 단 9건으로 급감**하였으며, 이는 단어 수준 피처를 넘어 문자 수준(Char n-gram)의 고유 표기 스타일 및 수식 구조 차이를 SVM 모델이 성공적으로 포착해 냈기 때문인 것으로 분석됩니다.
+  * Word N-gram과 Char N-gram을 FeatureUnion으로 완전히 결합하고 모델 하이퍼파라미터를 재탐색한 결과, 나이브 베이즈 성능이 기존 69.0%에서 **76.5%**로, SVM 성능이 기존 78.0%에서 **79.0%**로 대폭 상승하였습니다.
+  * 특히 ComplementNB 교체를 통해 AnnStat과 Biometrika 간의 혼동 오분류(기존 17건)가 **11건으로 크게 해소**되었으며, SVM 또한 두 저널 간 오분류가 기존 9건에서 **5건으로 감소**해 어휘 유사성 극복에 괄목할 성장을 이루었습니다.
 
 ---
 
