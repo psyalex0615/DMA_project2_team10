@@ -32,11 +32,26 @@ with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
 
                 # We only want to zip necessary files
                 # For AA: part1.py, horizontal.pkl, association.pkl
-                # For SE: make_index.py, CustomScoring.py, QueryResult.py, index folder
+                # For SE: make_index.py, CustomScoring.py, QueryResult.py, se_analyzer.py, index folder
                 # For CL: clasification.py, nb.pkl, svm.pkl
 
-                # Check for files
                 relative_path = os.path.relpath(filepath, ".")
+                parts = relative_path.replace("\\", "/").split("/")
+                top_folder = parts[0]
+
+                keep = False
+                if top_folder == "AA":
+                    if file == "part1.py" or "part1_horizontal.pkl" in file or "part1_association.pkl" in file:
+                        keep = True
+                elif top_folder == "SE":
+                    if "index" in parts or file in ["make_index.py", "CustomScoring.py", "QueryResult.py", "se_analyzer.py"]:
+                        keep = True
+                elif top_folder == "CL":
+                    if file == "clasification.py" or file.endswith("_nb.pkl") or file.endswith("_svm.pkl"):
+                        keep = True
+
+                if not keep:
+                    continue
 
                 # Skip temp/log files
                 if (
@@ -51,5 +66,6 @@ with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
 
 print(f"\nSuccessfully created {zip_filename}!")
 print(
-    "Please compile your 'DMA_project2_team01_보고서.md' to 'DMA_project2_team01_보고서.pdf' and add it and the presentation slides to this zip before final submission."
+    f"Please compile your 'DMA_project2_team{TEAM_NUMBER:02d}_보고서.md' to 'DMA_project2_team{TEAM_NUMBER:02d}_보고서.pdf' and add it and the presentation slides to this zip before final submission."
 )
+
