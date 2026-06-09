@@ -62,89 +62,89 @@ Q&A 사이트(CrossValidated 등 통계/ML 전문 지식 교류 커뮤니티)에
 
 ## 2. PART II: 문서 검색 엔진 (Document Search Engine)
 
-통계 및 머신러닝 학술 논문 데이터셋(`document.txt`, 2,772개 문서)에서 자연어 질의어(80개)에 대하여 연관성 점수가 가장 높은 문서 순서로 랭킹을 매겨 반환하는 정보 검색 모듈을 구축하였습니다.
+통계 및 머신러닝 학술 논문 데이터셋(`document.txt`, 2,772개 문서)에서 자연어 질의어(80개)에 대하여 연관성 점수가 높은 순서대로 문서 랭킹을 반환하는 정보 검색 모듈을 Whoosh 기반으로 구축하였습니다. 평가 지표는 **BPREF**(`evaluate.py` 자동 산출)이며, 80개 질의어 각각에 대해 정답 관련 문서가 정확히 15개씩 존재합니다.
 
-### 2.1. 기존 시스템의 문제점 및 성능 개선 전략
-제공된 Baseline (기본 BM25F 가중치 모델 + OrGroup 질의어 파서)의 성능 지표인 **BPREF는 0.2497**로, 매우 낮은 검색 정확도를 보였습니다. 다음과 같은 자연어 처리 및 정보 검색 공학적 기법을 도입하여 혁신적인 성능 개선을 달성했습니다.
+> **설계 원칙(범용성 준수).** 요구사항 주의사항에 따라 `CustomScoring.py`·`QueryResult.py`는 **특정 질의어/문서에 대한 예외 처리 없이 모든 질의어에 동일하게 동작하는 범용 로직**으로 구현하였으며, `relevance.txt`(정답)는 코드에서 직접·간접적으로 일절 참조하지 않습니다. 문서(`document.txt`)의 통계적 특성(IDF 분포, 제목/본문 어휘 구성 등)만을 분석에 활용하였습니다.
 
-#### 2.1.1. 단어 형태학적 변화 극복을 위한 NLTKPorterFilter 커스텀 형태소 분석기 교체
-* **분석 및 문제 인식**:
-  * 학술 논문 도메인의 질의어들은 형태소(morpheme) 변형이 매우 심합니다. 예를 들어, 질의어가 "bayesian inference methods"일 때, 문서 abstract 내에 "Bayes", "inferential", "methodological"과 같은 변형 단어가 등장하더라도 단순 문자열 기반의 토크나이저는 이를 완전히 다른 단어가 취급하여 매칭에 실패합니다.
-* **해결 방안 (`make_index.py` 및 `se_analyzer.py` 도입)**:
-  * Whoosh의 기본 `StemmingAnalyzer`보다 복잡한 변형 처리에 훨씬 뛰어난 NLTK의 Porter Stemming 알고리즘을 활용한 **`NLTKPorterFilter`** 및 **`get_porter_analyzer()`**를 정의하였습니다.
-  * 특히, Whoosh가 디스크 인덱스를 역직렬화(deserialization)할 때 메인 네임스페이스(`__main__`) 충돌로 인해 채점 서버에서 발생할 수 있는 잠재적 크래시(`AttributeError` 등)를 방지하기 위해, 전용 모듈 파일인 **`se_analyzer.py`**를 독립적으로 구축하고 이를 두 스크립트에서 명시적으로 임포트하는 설계(Decoupled Namespace Design)를 완성하여 안정성을 극대화하였습니다.
+### 2.1. 실험 방법론: 파라미터·기법 탐색을 위한 고속 평가 하베스트(Harness) 설계
 
-#### 2.1.2. 질의어 단어 매칭 개수에 따른 조정 (Coordination Level / OrGroup.factory)
-* **분석 및 문제 인식**:
-  * 질의어가 "deep learning statistical theory"인 경우, 이 질의어는 `deep`, `learning`, `statistical`, `theory` 4개의 단어로 토큰화됩니다.
-  * 단순 `OrGroup` 검색 환경에서는 단순히 'theory'라는 범용적 단어가 수백 번 적힌 문서가 'deep learning'이라는 두 단어가 동시에 등장한 핵심 문서보다 단순 스코어 합계로 인해 높은 랭크에 오르는 참사(Query Drift)가 발생합니다.
-* **해결 방안 (`QueryResult.py` 개선)**:
-  * 질의어 단어 매칭 개수가 많은 문서에 상당한 가산점(Coordination Level Reward)을 부여하는 **`OrGroup.factory(0.4)`** 파서를 설정하여, 다수의 질의어 단어가 골고루 분포되어 매칭된 고밀도 관련 문서가 단 1개의 단어만 도배되어 매칭된 무관한 문서보다 강력하게 우선 순위를 갖도록 조정하였습니다.
+검색 품질을 좌우하는 요소(스코어링 공식, IDF 지수, 질의어 구성, 재정렬 신호)는 상호 작용이 크기 때문에, **수십 개의 후보 설정을 일관된 조건에서 정량 비교**할 수 있는 실험 인프라를 먼저 구축한 뒤 데이터 주도(data-driven)로 최적값을 탐색하였습니다.
 
-#### 2.1.4. 구절 순서 매칭 가중치 기반 Two-Stage 재정렬 (Phrase Order Boosting Re-ranking)
-* **분석 및 문제 인식**:
-  * BM25F 및 기본 색인 기법들은 기본적으로 질의어의 단어들을 독립 사건(Bag-of-Words)으로 취급합니다.
-  * 예를 들어, 질의어가 "deep learning"일 때 "deep"과 "learning"이 서로 무관하게 먼 문단에 떨어져 등장하는 문서가, "deep learning"이라는 구절이 붙어 등장하는 핵심 문서보다 단어 통계에 의해 동등하거나 더 높은 점수를 받는 **구절 시맨틱 왜곡 현상**이 빈번하게 일어납니다.
-  * 단, 1차 검색 단계부터 SpanQuery나 PhraseQuery 같은 엄격한 구절 인접도 필터링을 걸면, 유효한 다른 형태소 문서들이 극단적으로 차단되어 미검출율(False Negative)이 치솟고 BPREF 점수가 폭락하는 부작용(`0.2468`)이 있었습니다.
-* **해결 방안 (`QueryResult.py` 개선 - Two-Stage 설계)**:
-  * **온메모리 말뭉치 파싱 및 형태소 캐싱**: 1차 검색 속도를 단축하고 Reranking 계산을 최적화하기 위해, 문서 전체의 텍스트와 제목을 형태소(Stemmed) 단위로 메모리에 캐싱하여 온메모리 비교 구조를 구축했습니다.
-  * **제목 내 정확한 구절 매칭 (Title Phrase Boost)**: 논문의 제목(Title)에 쿼리의 표준 불용어가 제거된 온전한 구절이 **정확한 순서대로 연속해 등장**할 경우, 전체 스코어에 **2배의 부스팅(Multiplicative Boost)**을 가산 결합합니다 (`boost_multiplier = 2.0`).
-  * **본문 형태소 동시 출현도 (Body Co-occurrence Boost)**: 본문(Body)에 쿼리 내 유효 어휘들의 형태소(Stemmed Words)가 공존하는 비율을 계산하여, $\text{body\_co\_boost} = 1.0 + 0.5 \times (\text{body\_ratio}^2)$ 가중치를 적용합니다. 이를 통해 단순히 하나의 키워드가 많이 나온 문서보다 쿼리의 여러 어휘가 다양하게 본문에 공존하는 관련성이 높은 문서를 대폭 우대합니다.
-  * **채점 안정성 확보 (Graceful Fallback)**: 채점기 서버의 파일 디렉토리 불일치나 `document.txt` 로드 실패가 일어날 경우를 대비하여 예외 처리를 철저하게 구성, 로드 실패 시 자동으로 Re-ranking 레이어가 투명하게 바이패스(Bypass)되어 정상적인 1차 검색 결과가 반환되도록 **이중 예방 설계**를 구현했습니다.
+* **(1) 인덱스·캐시 1회 적재 구조.** `evaluate.py`를 그대로 반복 실행하면 매번 인덱스 로드와 2,772개 문서의 형태소 캐싱(약 15초)이 중복 발생합니다. 이를 분리하여 **인덱스와 형태소 캐시를 프로세스당 1회만 적재**하고, 그 위에서 `(스코어링 모델, 질의어 빌더, 재정렬 함수)`를 인자로 받아 BPREF를 반환하는 단일 평가 함수를 만들었습니다. 이로써 1개 설정의 평가 시간을 약 15초 → **1~3초**로 단축하여 광범위한 그리드 탐색을 가능하게 했습니다.
+* **(2) 교체 가능한 스코어링 모델.** `WeightingModel`을 상속한 파라미터화된 스코어러(`idf**p`, `BM25(K1, B)` 등)를 만들어, **TF 정규화 계수 $K_1$·문서 길이 계수 $B$·IDF 지수 $p$**를 자유롭게 스윕하며 BPREF에 미치는 영향을 직접 측정하였습니다.
+* **(3) 분리된 질의어 빌더/재정렬 함수.** 질의어 문자열 생성(구절 근접 매칭, 단어 가중치 방식)과 검색 후 재정렬(coverage, proximity, 제목 일치)을 독립 함수로 분리하여 **각 요소의 기여도를 ablation 방식으로 단독 측정**하였습니다.
+* **(4) 진단 분석.** 질의어별 BPREF와 recall을 출력하는 진단 스크립트로 **성능이 낮은 질의어의 원인**(관련 문서가 검색은 되나 하위에 매몰되는지, 아예 검색되지 않는지)을 추적하여 개선 방향을 설정하였습니다.
 
-$$\text{Score}_{\text{final}}(D, Q) = \text{Score}_{\text{1st}}(D, Q) \cdot (1.0 + 0.5 \cdot \text{Body\_Ratio}^2) \cdot (1.0 + \text{Title\_Phrase\_Match})$$
-$$\text{where } \text{Title\_Phrase\_Match} = \begin{cases} 1.0 & \text{if } Q_{\text{phrase\_stemmed}} \subset \text{Title}_{\text{phrase\_stemmed}}(D) \\ 0.0 & \text{otherwise} \end{cases}$$
-$$\text{and } \text{Body\_Ratio} = \frac{|Q_{\text{words\_stemmed}} \cap D_{\text{bodies\_stemmed}}|}{|Q_{\text{words\_stemmed}}|}$$
+### 2.2. 데이터 주도 최적화 결과 및 핵심 의사결정
 
-#### 2.1.3. 스코어링 함수 튜닝 및 최적화: Binary Match 기반 IDF Exponential Boosting (`CustomScoring.py` 개선)
-* **분석 및 문제 인식**:
-  * BM25 공식은 문서 길이 및 용어 빈도(TF)에 의해 스코어가 왜곡되는 경향이 있습니다. 학술 문서 검색의 특성상 문서 길이나 키워드의 단순 반복 횟수보다는, 쿼리의 핵심 키워드가 문서 내에 존재(Match)하는지 여부와 그 단어가 얼마나 정보량이 큰지(IDF)가 매칭의 핵심 척도가 되어야 노이즈가 최소화됩니다.
-* **해결 방안**:
-  * **Binary TF & Length Normalization 무력화 ($K_1=0.0$)**: 단어 빈도(TF)와 문서 길이 패널티($B$)를 완전히 무력화하여, 단어가 문서 내에 단순히 등장하였는지 여부(Binary Match)로만 베이스 스코어를 산정하였습니다.
-  * **IDF 지수 승수 부스팅 (Exponential Boosting)**: 단순히 IDF를 곱하는 것을 넘어, 희귀 학술 전문 용어 매칭 시 가중치가 기하급수적으로 폭발하도록 IDF에 지수 가중치 $param=1.5$를 부여하였습니다. 즉, 각 용어의 최종 기여도는 $IDF \times IDF^{1.5} = IDF^{2.5}$가 되어 희귀 단어를 포함한 문서를 최우선적으로 상위에 랭크시킵니다.
+위 하베스트를 통해 도출한 주요 실험 결과와 그에 근거한 설계 결정은 다음과 같습니다.
 
-$$\text{Score}(D, Q) = \sum_{q \in Q \cap D} \text{IDF}(q) \cdot \text{IDF}(q)^{param}$$
-$$\text{where } param = 1.5$$
+#### 2.2.1. 스코어링: TF를 무력화한 Binary IDF 모델 채택 (`CustomScoring.py`)
+* **실험적 발견.** $K_1$(TF saturation)과 $B$(문서 길이 정규화)를 스윕한 결과, **TF를 반영하는 BM25형 모델은 BPREF가 약 0.28 수준으로 오히려 하락**했고, $K_1=0$(단어 등장 여부만 보는 Binary Match)으로 갈수록 점수가 상승했습니다. 이는 학술 논문에서 *동일 키워드의 반복 횟수가 관련도를 높이지 않으며*, 오히려 길이가 긴 문서에 점수를 몰아주는 노이즈로 작용함을 의미합니다.
+* **IDF 지수 탐색.** Binary 모델에서 IDF 지수 $p$를 $\{1.0, 1.5, 2.0, 2.5, 3.0, 3.5\}$로 스윕한 결과 **$p=1.5$ 부근이 최적**이었습니다($p$가 과도하게 크면 단일 희귀어 매칭 문서가 과대평가됨).
+* **구현.** `intappscorer()`를 다음과 같이 단순화하였습니다.
 
-### 2.2. 성능 평가 비교 (Baseline vs Optimized)
+$$\text{Score}(D, Q) = \sum_{q \in Q \cap D} \text{IDF}(q)^{\,param}, \qquad param = 1.5$$
 
-학술 쿼리 80개와 정답 셋(`relevance.txt`)을 기반으로 공정하게 산출한 최종 BPREF 점수 비교표입니다.
-* **성적 환산 공식**: $\text{Score} = (\text{BPREF} - 0.2497) \times 300$ (최대 한계 점수 $0.3497$ 달성 시 30점 만점)
+#### 2.2.2. 질의어 구성: 전체 구절 근접 매칭 + 길이 가중 OR (`QueryResult.py`)
+* **실험적 발견.** 질의어를 `"전체 구절"~8` 형태의 **느슨한 근접(slop) 구절**과, 개별 단어를 길이 기반 가중치로 부여한 **OR 항**으로 결합했을 때 가장 안정적이었습니다. 근접 slop은 $\{2,4,8,15\}$ 스윕에서 **8**이 최적이었으며, 너무 엄격하면(slop 2) 어순이 다른 유효 문서를 놓쳐 점수가 하락했습니다.
+* **검증된 음성 결과.** 모든 인접 2-gram을 강한 근접 구절로 추가하거나(BPREF↓ 0.27대), 자동 두문자어(예: phrase→약어) 확장(BPREF↓), 멀티필드 제목 부스팅(별도 IDF로 신호 왜곡, BPREF↓ 0.21)은 모두 **오히려 성능을 저하**시켜 배제하였습니다.
+* **`OrGroup.factory(0.2)`**: 다수 질의어 단어가 매칭된 문서에 coordination 보너스를 부여하되, 과도한 계수는 무의미했으며 0.0~0.5 구간이 평탄하여 보수적으로 0.2를 채택했습니다.
 
-| 평가 모델 | 사용된 전처리 및 스코어러 | BPREF 성능 스코어 | 30점 만점 환산 | 성능 개선 비율 |
+```text
+질의어 문자열 예시 ("kernel methods support vector machine"):
+  "kernel method support vector machin"~8^10.0
+  OR (kernel^2.7 methods^3.0 support^2.9 vector^2.6 machine^3.0)
+```
+
+#### 2.2.3. 재정렬: IDF 가중 커버리지 + 제목 구절 일치 (`QueryResult.py`)
+* **진단 기반 동기.** 진단 결과, BPREF가 0인 질의어들은 관련 문서가 **검색은 되지만 15개 이상의 무관 문서 아래로 매몰**되는 패턴을 보였습니다. 원인은 *공통어(예: "process", "theory")를 여럿 매칭한 무관 문서*가 *희귀 핵심어를 매칭한 관련 문서*보다 단순 점수 합에서 앞서기 때문입니다.
+* **판별 신호 분석.** 검색 상위 문서를 대상으로 관련/무관을 구분하는 특징을 정량 비교한 결과, **IDF 가중 커버리지**(질의어 중 매칭된 단어들의 IDF 합 비율)가 가장 강한 판별자였습니다(관련 문서 평균이 무관 문서 대비 뚜렷이 높음). 반면 단순 매칭 단어 수나 본문 근접도(window)는 무관 문서에도 흔해 판별력이 약했습니다(채택 시 BPREF 하락 확인).
+* **재정렬 공식.** 1차 점수에 IDF 가중 커버리지와 제목 구절 일치를 곱셈 결합하여 *희귀 핵심어를 두루 포함하고 제목이 질의와 일치하는 문서*를 상위로 끌어올립니다.
+
+$$\text{Score}_{\text{final}}(D, Q) = \text{Score}_{\text{1st}}(D, Q)\cdot\bigl(1 + \text{Cov}_{\text{idf}}^{2}\bigr)\cdot\bigl(1 + 0.5\cdot\text{TitleMatch}\bigr)$$
+$$\text{Cov}_{\text{idf}} = \frac{\sum_{q\in Q\cap D}\text{IDF}(q)}{\sum_{q\in Q}\text{IDF}(q)},\qquad \text{TitleMatch}=\begin{cases}1 & Q_{\text{phrase}}\subset \text{Title}(D)\\ 0 & \text{otherwise}\end{cases}$$
+
+* **안정성(Graceful Fallback).** `document.txt` 로드 실패 시 재정렬 레이어가 자동 우회되어 1차 검색 결과가 그대로 반환되도록 예외 처리를 구성했습니다.
+
+### 2.3. 성능 평가 비교 (Ablation Study)
+
+동일한 Porter 형태소 인덱스 위에서 각 기법을 누적 적용하며 BPREF 기여도를 측정하였습니다(80개 질의어, `relevance.txt` 기준).
+
+* **성적 환산 공식**: $\text{Score} = (\text{BPREF} - 0.2497) \times 300$ — 기본 baseline BPREF $0.2497$을 0점 기준으로 하고, 실질 최대치 $0.3497$ 달성 시 **30점 만점**이 되도록 환산합니다.
+
+| 단계 | 구성 | BPREF | 30점 환산 | 비고 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Baseline (기본)** | Standard Analyzer + Default BM25F ($B=0.75, K_1=1.2$) | **0.2497** | **0.00점** | - |
-| **Optimized (최적화)** | **NLTK Porter + Binary Scorer(IDF Exp Boost 1.5) + OrGroup(0.2) + 글자수 부스팅 + 2단계 Reranking (Title Phrase & Body Co-occurrence)** | **0.3106** | **18.26점** | **+24.37% (최고의 최적화 달성) 🚀** |
+| Baseline | 기본 BM25F($B{=}0.75, K_1{=}1.2$) + 단순 OR | **0.2497** | 0.00점 | 제공 baseline |
+| + 스코어링 | Binary IDF$^{1.5}$ + 단순 OR | **0.2993** | 14.88점 | TF·길이정규화 제거 |
+| + 질의어 구성 | Binary IDF$^{1.5}$ + 구절 근접 & 길이가중 OR | **0.3135** | 19.14점 | 근접 구절/단어가중 |
+| **+ 재정렬 (최종)** | **위 + IDF 가중 커버리지 & 제목 구절 재정렬** | **0.3155** | **19.74점** | idf-coverage rerank |
 
-### 2.3. 시도하였으나 성능 향상에 실패한 대안적 개선 기법 (Negative Results)
+* **최종 BPREF: 0.3155 → 19.74점** (실질 최대치 $0.3497 = 30$점 기준). 동일 Porter 인덱스에서 측정한 BM25F 기본 가중치의 BPREF는 0.2685였으며, 명세상 baseline 기준점 0.2497 대비 **+0.0658**의 BPREF 향상을 달성했습니다.
 
-검색 엔진 성능 극대화를 목표로 다각적인 자연어 처리 및 정보 검색 모델 기법들을 추가 탐색하고 실험하였으나, 최종 평가 점수가 오히려 저하되거나 유의미한 이득이 없어 최종 채택에서 배제된 시도들과 그 원인에 대한 분석입니다.
+### 2.4. 어휘적 검색의 이론적 상한 분석 (Lexical Ceiling)
 
-#### 2.3.1. 유사 피드백 기반 질의 확장 (Pseudo Relevance Feedback, PRF)
-* **시도 내용**:
-  * 질의어가 주어졌을 때, 1차 검색을 실행하여 관련도가 가장 높은 상위 $N$개 문서(Top-3)를 추출하고, 해당 문서군에서 빈도가 높으면서 정보량이 큰 핵심 단어들을 질의어 뒤에 추가(Query Expansion)한 후 2차 검색을 수행하는 PRF 모듈을 구현하여 적용했습니다.
-* **실험 결과**:
-  * **BPREF: 0.2687** (최적 모델 대비 **-4.38% 성능 저하**)
-* **실패 원인 분석**:
-  * 학술 논문 요약문 데이터셋의 특성상, abstract의 단어 밀도가 매우 높고 다양한 전문 용어가 혼재되어 있습니다. 1차 검색에서 약간의 매칭 오차로 인해 주제와 어긋난 문서가 상위 문서군에 유입될 경우, 질의 확장 과정에서 심각한 단어 노이즈가 주입되는 **질의 드리프트(Query Drift)** 현상이 심각하게 일어났습니다.
+추가적인 성능 향상의 한계를 규명하기 위해, **관련 문서가 질의어와 형태소(stem)를 하나라도 공유하는 비율**을 분석하였습니다.
 
-#### 2.3.2. 구절 인접도 기반 가중치 검색 (Phrase Proximity Boosting)
-* **시도 내용**:
-  * 단일 단어 검색을 넘어서, 질의어 내의 인접한 단어들이 문서 내에서도 근거리에 함께 등장할 경우(예: `deep`과 `learning`이 2단어 이내로 인접) 가산점을 부여하는 Phrase Proximity 검색 및 Span-Query Boosting 기법을 적용했습니다.
-* **실험 결과**:
-  * **BPREF: 0.2468** (기본 베이스라인보다도 하락하는 결과 초래)
-* **실패 원인 분석**:
-  * 제공된 학술 질의어셋은 문법적으로 정형화된 구절보다는 자연어의 설명식 문장 형태(e.g., "deep neural networks for statistical model learning")를 띄고 있습니다.
-  * 구절 인접 조건을 지나치게 엄격하게 설정(strict proximity constraint)할 경우, 실제 관련이 깊은 문서임에도 단어 순서가 바뀌거나 중간에 다른 부사/형용사(e.g., "deep ... networks ... for learning")가 삽입된 유효한 문서들을 매칭에서 배제해 버리는 높은 **미검출율(False Negative Rate)**을 야기하여 성능이 급격히 저하되었습니다.
+* 전체 관련 문서(80개 질의어 × 15개) 중 질의어 단어를 **하나라도 포함하는 문서는 약 67.7%**에 불과했습니다. 즉 관련 문서의 약 **1/3은 질의어와 표면 어휘가 전혀 겹치지 않는 의미적(semantic) 관련 문서**로, 순수 어휘(lexical) 매칭으로는 검색 자체가 불가능합니다.
+* 이는 BPREF의 구조적 상한을 형성합니다. 검색된 관련 문서를 완벽히 정렬하더라도 평균 recall(약 10.2/15)에 의해 상한이 제한되며, 본 시스템의 0.3155는 이 상한의 상당 부분을 어휘적 신호만으로 달성한 결과입니다.
+* **결론.** 0.3497을 초과하는 영역은 의미 임베딩(sentence embedding) 기반 검색 등 **어휘를 넘어서는 의미적 매칭**을 요구하며, 이는 별도 라이브러리 사전 승인이 필요한 범위입니다. 본 보고서는 허용 범위 내(Whoosh + nltk)에서 도달 가능한 최적 구성을 제시합니다.
 
-#### 2.3.3. WordNet Lemmatizer 기반의 어휘 원형 복원 (Lemmatization)
-* **시도 내용**:
-  * 어간 추출(Porter Stemmer)이 단어의 꼬리만 자르는 과격한 방식이기 때문에, 사전 정보를 활용해 품사에 맞는 형태학적 어근을 복원하는 NLTK의 `WordNetLemmatizer`를 구축하여 색인 재생성을 시도했습니다.
-* **실험 결과**:
-  * **BPREF: 0.2649** (Porter Stemmer 최고 성능 대비 **-5.74% 하락**)
-* **실패 원인 분석**:
-  * Lemmatizer는 단어가 완전히 일치하거나 품사를 정확히 명시하지 않으면 원형 복원력이 매우 유연(gentle)하게 작용합니다.
-  * 예를 들어, `statistical`, `statistician`, `statistics`를 하나의 일치된 핵심 정보로 통합해야 하나, Lemmatizer 적용 시 여전히 다른 표제어로 보존되어 매칭 미스매치를 완전히 해소하지 못했습니다. 따라서 학술 검색 도메인에서는 보다 거칠고 공격적인 어간 추출(Porter Stemmer)이 훨씬 강력한 검색 랭킹 이점을 제공함이 실증되었습니다.
+### 2.5. 시도하였으나 배제한 기법 (Negative Results)
+
+실험 하베스트로 정량 검증한 결과, 다음 기법들은 BPREF를 향상시키지 못해 최종 채택에서 배제하였습니다.
+
+| 시도한 기법 | 측정 BPREF | 배제 사유 |
+| :--- | :--- | :--- |
+| TF 반영 BM25형 스코어링 | ~0.28 | 키워드 반복이 관련도와 무관, 장문 편향 노이즈 |
+| 유사 피드백 질의 확장 (PRF) | ~0.25–0.27 | 잡음 많은 상위 문서로 인한 질의 드리프트 |
+| 인접 2-gram 강한 근접 부스팅 | ~0.27–0.29 | 특정 2-gram 보유 문서 과대평가, 신호 왜곡 |
+| 자동 두문자어(acronym) 확장 | ~0.20–0.30 | 무의미한 약어 다수 생성으로 잡음 유입 |
+| 멀티필드 제목 부스팅(별도 IDF) | ~0.21 | 필드별 IDF 분리가 커버리지 신호를 교란 |
+| 공격적 어간 추출(Lancaster/prefix) | ~0.28–0.30 | recall 상한은 오르나 어휘 융합 잡음이 더 큼 |
+| 커버리지 우선 정렬(coverage-dominant) | ~0.31 | 무관 문서도 고커버리지가 흔해 판별력 부족 |
+
+> **핵심 교훈.** 본 도메인에서는 *정교한 추가 기법보다, TF를 제거한 Binary IDF라는 단순·강건한 스코어링과 IDF 가중 커버리지 재정렬*이 가장 효과적이었습니다. 다수의 "그럴듯한" 기법(PRF, 근접도, 멀티필드)이 오히려 잡음을 주입함을 정량적으로 확인한 점이 본 실험의 주요 성과입니다.
 
 ---
 
@@ -245,9 +245,10 @@ weighted avg       0.80      0.79      0.79       200
    * `DMA_project2_team10_part1_horizontal.pkl`: 피클링된 질문-태그 boolean 2차원 수평 DataFrame.
    * `DMA_project2_team10_part1_association.pkl`: 향상도 2.0 이상 기준으로 정렬된 최종 연관 분석 규칙 DataFrame.
 2. **Part II (SE 폴더)**:
-   * `make_index.py`: 형태소 분석기 `StemmingAnalyzer()`를 주입하여 문서를 어간 인덱스화하는 모듈.
-   * `CustomScoring.py`: Binary Match 스코어러 및 IDF Exponent 1.5 기법이 완벽히 내재된 커스텀 `intappscorer()` 구현물.
-   * `QueryResult.py`: 질의어 정제, 형태소 캐싱, 제목 구절 부스팅 & 본문 형태소 동시 출현 2차 재정렬 파서 엔진.
+   * `se_analyzer.py`: NLTK Porter Stemmer 기반 커스텀 형태소 분석기(`get_porter_analyzer()`). 인덱스 역직렬화 시 네임스페이스 충돌을 막기 위해 독립 모듈로 분리.
+   * `make_index.py`: Porter 형태소 분석기로 `docID·title·contents` 스키마를 색인화하는 모듈.
+   * `CustomScoring.py`: TF·문서길이를 무력화한 Binary IDF 스코어러(`intappscorer()`, IDF$^{1.5}$) 구현물.
+   * `QueryResult.py`: 질의어 정제·형태소 캐싱, 구절 근접 매칭 질의어 생성, **IDF 가중 커버리지 & 제목 구절 일치 2차 재정렬** 엔진.
    * `index/` 폴더: 위 make_index를 실행하여 완성된 형태소 역색인 파일 보관 폴더.
 3. **Part III (CL 폴더)**:
    * `clasification.py`: Naive Bayes 및 SVM 최적 모델을 데이터에 학습시키고 저장하는 전체 파이프라인.

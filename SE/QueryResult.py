@@ -2,13 +2,19 @@ import whoosh.index as index
 from whoosh.qparser import QueryParser, OrGroup
 import CustomScoring as scoring
 from nltk.corpus import stopwords
-from se_analyzer import NLTKPorterFilter, get_porter_analyzer
+from nltk.stem import PorterStemmer
 import re
 from math import log
 
 
-# Safely load the documents into memory at module load time for high-performance Re-ranking
-doc_dict = {}
+# ─────────────────────────────────────────────────────────────────────────
+#  문서 본문을 메모리에 적재 (re-ranking 단계에서 사용).
+#  문서의 통계적 특성(어떤 질의어 단어가 문서에 등장하는지, 제목 구 일치
+#  여부)을 활용하는 것은 허용된 "문서 분석"에 해당하며, 특정 질의어/문서에
+#  대한 예외 처리가 아닌 범용 로직이다. relevance.txt 는 일절 참조하지 않는다.
+# ─────────────────────────────────────────────────────────────────────────
+doc_dict = {}        # docID -> 본문 전체 (소문자, 구두점 제거, 공백 정규화)
+doc_title = {}       # docID -> 제목 행 (소문자, 구두점 제거)
 try:
     with open('doc/document.txt', 'r', encoding='utf-8') as f:
         text = f.read()
@@ -16,134 +22,114 @@ try:
         for doc in docs:
             br = doc.find('\n')
             docID = int(doc[:br])
-            doc_text = doc[br+1:].lower()
-            doc_text = re.sub(r'[^a-z0-9\s]', ' ', doc_text)
-            doc_text = ' '.join(doc_text.split())
-            doc_dict[docID] = doc_text
+            raw = doc[br + 1:]
+            # 제목 = 본문 첫 줄 (newline 보존을 위해 정규화 전에 분리)
+            title_line = raw.strip().split('\n')[0].lower()
+            doc_title[docID] = re.sub(r'[^a-z0-9\s]', ' ', title_line)
+            body = re.sub(r'[^a-z0-9\s]', ' ', raw.lower())
+            doc_dict[docID] = ' '.join(body.split())
 except Exception:
     pass
 
-# Lazy pre-stemmed caches
-doc_bodies_stemmed = {}
-doc_titles_stemmed = {}
-doc_titles_phrase_stemmed = {}
+# 문서별 stem 캐시 (지연 초기화)
+doc_body_stems = {}       # docID -> {stem, ...}  (문서 전체 단어 집합)
+doc_title_phrase = {}     # docID -> "stem stem ..."  (제목을 stem 한 문자열)
 
-def init_stemmed_caches(stemmer):
-    global doc_bodies_stemmed, doc_titles_stemmed, doc_titles_phrase_stemmed
-    if doc_bodies_stemmed:
+
+def _init_caches(stemmer, stop_words):
+    if doc_body_stems:
         return
     for docID, text in doc_dict.items():
-        # Clean doc text has title on the first line
-        lines = text.strip().split('\n')
-        title = lines[0] if lines else ""
-        doc_bodies_stemmed[docID] = {stemmer.stem(w) for w in text.split() if w}
-        doc_titles_phrase_stemmed[docID] = " ".join([stemmer.stem(w) for w in title.split() if w])
-        doc_titles_stemmed[docID] = {stemmer.stem(w) for w in title.split() if w}
+        doc_body_stems[docID] = {
+            stemmer.stem(w) for w in text.split() if w and w not in stop_words
+        }
+        title_line = doc_title.get(docID, '')
+        doc_title_phrase[docID] = ' '.join(
+            stemmer.stem(w) for w in title_line.split() if w and w not in stop_words
+        )
+
 
 def getSearchEngineResult(query_dict):
     """
     질의어 딕셔너리를 받아 검색 결과를 반환한다.
-    - query_dict: {queryID: query_text, ...}
-    - 반환값: {queryID: [docID, docID, ...], ...}  (관련도 순)
+      - query_dict : {queryID: query_text, ...}
+      - return     : {queryID: [docID, docID, ...], ...}  (관련도 내림차순)
+
+    [동작 개요 — 모든 질의어에 동일하게 적용되는 범용 로직]
+      1) 채점(CustomScoring): TF·문서길이를 무력화한 Binary IDF 모델.
+         IDF^param 으로 희소(specific) 단어 매칭에 가중.
+      2) 질의어 변환: 전체 구(phrase)를 느슨한 근접 매칭(~8)으로 OR 결합하고,
+         개별 단어는 길이 기반 보정 가중치를 부여해 OR 질의로 확장.
+      3) Re-ranking: 검색된 문서를 (a) IDF 가중 질의어 커버리지,
+         (b) 제목-구 일치 보너스로 재정렬. 질의어의 희소 단어를 많이
+         포함하고 제목이 질의와 일치하는 문서를 상위로 끌어올린다.
     """
     result_dict = {}
     ix = index.open_dir("index")
 
-    # [1] 어휘 캐싱 및 스태머 준비
-    from nltk.stem import PorterStemmer
     stemmer = PorterStemmer()
-    init_stemmed_caches(stemmer)
-    
-    # 학술 용어 노이즈 단어 정의 (OR 매칭 단어들에서만 걸러내어 노이즈 유입 차단)
-    stopWords = set(stopwords.words('english'))
-    academic_stopwords = {'using', 'results', 'based', 'study', 'analysis', 'research', 'methods', 'used', 'paper', 'use', 'approach', 'show', 'method', 'provide', 'findings'}
-    strict_stopWords = stopWords.union(academic_stopwords)
+    stop_words = set(stopwords.words('english'))
+    _init_caches(stemmer, stop_words)
 
-    # Custom scoring (param=1.5로 idf**2.5 Binary Match 적용)
-    # OrGroup factor = 0.2로 단어 매칭 개수별 가중치 최적화
+    # CustomScoring: Binary IDF 모델. param=1.5 -> idf**1.5 가중.
     with ix.searcher(weighting=scoring.ScoringFunction(param=1.5)) as searcher:
         parser = QueryParser("contents", schema=ix.schema, group=OrGroup.factory(0.2))
 
+        N = searcher.doc_count_all()
+
+        def term_idf(stem):
+            df = searcher.doc_frequency("contents", stem)
+            return log(N / (df + 1)) + 1.0
+
         for qid, q in query_dict.items():
-            cleaned_q = re.sub(r'[^a-zA-Z0-9\s]', ' ', q)
-            words = cleaned_q.split()
-            
-            # (A) 구절(Phrase)용 단어 추출 - 표준 stopword만 제거하여 구문 맥락 유지
-            phrase_words = []
-            for word in words:
-                cleaned_word = word.lower().strip()
-                if cleaned_word not in stopWords and cleaned_word != '':
-                    phrase_words.append(cleaned_word)
-                    
-            # (B) 개별 단어(OR)용 단어 추출 - strict stopword(학술노이즈 포함) 제거 및 글자 수 비선형 부스팅
-            term_queries = []
-            strict_term_words = []
-            for word in words:
-                cleaned_word = word.lower().strip()
-                if cleaned_word not in strict_stopWords and cleaned_word != '':
-                    strict_term_words.append(cleaned_word)
-                    auto_boost = round(log(len(cleaned_word) + 1.0) * 1.5, 1)
-                    term_queries.append(f"{cleaned_word}^{auto_boost}")
-            
-            # strict filter로 다 지워질 경우, 일반 stopword 기준으로 복구 (Fallback)
-            if not term_queries:
-                for word in phrase_words:
-                    auto_boost = round(log(len(word) + 1.0) * 1.5, 1)
-                    term_queries.append(f"{word}^{auto_boost}")
-                    strict_term_words.append(word)
-            
-            if not phrase_words and not term_queries:
+            # ---- 질의어 토큰화 (구두점 제거 + 불용어 제거) ----
+            words = [
+                w for w in re.sub(r'[^a-zA-Z0-9\s]', ' ', q).lower().split()
+                if w and w not in stop_words
+            ]
+
+            if not words:
                 result_dict[qid] = []
                 continue
-                
-            base_query = " ".join(phrase_words)
-            boosted_terms = " ".join(term_queries)
-            
-            # (C) 최종 합성: "슬롭 구문 검색 OR (글자수로 차등 가중치 먹인 개별 단어들)"
-            if base_query:
-                final_query_string = f'"{base_query}"~8^10.0 OR ({boosted_terms})'
-            else:
-                final_query_string = boosted_terms
-                
-            query = parser.parse(final_query_string)
-            results = searcher.search(query, limit=None) # Retrieve ALL matching documents
-            
+
+            stems = [stemmer.stem(w) for w in words]
+            phrase = ' '.join(stems)
+
+            # ---- (2) 질의어 객체 생성 ----
+            # 전체 구 근접 매칭 + 개별 단어(길이 기반 가중) OR 결합
+            term_part = ' '.join(
+                f'{w}^{round(1.5 * log(len(w) + 1.0), 1)}' for w in words
+            )
+            query_string = f'"{phrase}"~8^10.0 OR ({term_part})'
+            query = parser.parse(query_string)
+
+            results = searcher.search(query, limit=None)
             if not results:
                 result_dict[qid] = []
                 continue
 
-            # (D) Reranking using Title Phrase Boost and Body Co-occurrence
-            q_phrase_stemmed = " ".join([stemmer.stem(w) for w in phrase_words])
-            q_words_stemmed = {stemmer.stem(w) for w in strict_term_words}
-            q_len = len(q_words_stemmed)
-            
-            results_list = [(res['docID'], res.score) for res in results]
-            
+            # ---- (3) Re-ranking ----
+            q_stem_set = set(stems)
+            idf_total = sum(term_idf(s) for s in q_stem_set) or 1.0
+            idf_map = {s: term_idf(s) for s in q_stem_set}
+
             reranked = []
-            for docID, original_score in results_list:
-                title_phrase_stemmed = doc_titles_phrase_stemmed.get(docID, '')
-                title_words_stemmed = doc_titles_stemmed.get(docID, set())
-                
-                # 1. Exact phrase match in title (using phrase_title_boost = 1.0)
-                phrase_match = 0.0
-                if q_phrase_stemmed and q_phrase_stemmed in title_phrase_stemmed:
-                    phrase_match = 1.0
-                
-                boost_multiplier = 1.0 + phrase_match
-                
-                # 2. Co-occurrence match in body
-                doc_words_stemmed = doc_bodies_stemmed.get(docID, set())
-                body_matches = sum(1 for qw in q_words_stemmed if qw in doc_words_stemmed)
-                body_ratio = (body_matches / q_len) if q_len > 0 else 0.0
-                body_co_boost = 1.0 + 0.5 * (body_ratio ** 2)
-                
-                final_score = original_score * body_co_boost * boost_multiplier
+            for res in results:
+                docID = res['docID']
+                base_score = res.score
+
+                # (a) IDF 가중 질의어 커버리지: 매칭된 질의어 단어의 IDF 합 / 전체 IDF 합
+                #     희소(specific)한 질의어 단어를 매칭한 문서일수록 높음.
+                matched = q_stem_set & doc_body_stems.get(docID, set())
+                cov_idf = sum(idf_map[s] for s in matched) / idf_total
+
+                # (b) 제목-구 일치 보너스
+                title_match = 1.0 if (phrase and phrase in doc_title_phrase.get(docID, '')) else 0.0
+
+                final_score = base_score * (1.0 + cov_idf ** 2) * (1.0 + 0.5 * title_match)
                 reranked.append((docID, final_score))
-                
+
             reranked.sort(key=lambda x: x[1], reverse=True)
             result_dict[qid] = [docID for docID, _ in reranked]
-
-    return result_dict
-
 
     return result_dict
