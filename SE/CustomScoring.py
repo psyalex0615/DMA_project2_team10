@@ -128,21 +128,20 @@ class WeightLengthScorer(BaseScorer):
 # ╚════════════════════════════════════════════════════════════╝
 
 def intappscorer(tf, idf, cf, qf, dc, fl, avgfl, param):
-    # tf    - term frequency in the current document  (문서 내 단어 빈도)
-    # idf   - inverse document frequency              (역문서 빈도)
-    # cf    - term frequency in the collection         (전체 컬렉션 내 단어 빈도)
-    # qf    - term frequency in the query              (질의어 내 단어 빈도)
-    # dc    - doc count                                (전체 문서 수)
-    # fl    - field length in the current document     (현재 문서 길이)
-    # avgfl - average field length across documents    (평균 문서 길이)
-    # param - free parameter                           (자유 파라미터)
+    if tf == 0:
+        return 0.0
 
-    # Optimized BM25 parameters
-    B = 0.5
-    K1 = 0.5
-    
-    score = idf * ((tf * (K1 + 1)) / (tf + K1 * ((1 - B) + B * fl / avgfl)))
-    return score
+    # [1] K1 = 0.0으로 단어 빈도(TF) 무력화 및 문서 길이 패널티 B 무력화
+    # 단순 등장 여부(Binary Match)로만 판단하여 노이즈 차단
+    tf_norm = 1.0
+    base_word_score = idf * tf_norm
+
+    # [2] IDF의 param 승수 보너스 (param = 1.2로 최종 idf ** 2.2 가중치 획득)
+    # param은 float형 변수로 ScoringFunction(param=1.2)에서 넘어옴
+    match_bonus = (idf ** param)
+
+    final_score = base_word_score * match_bonus
+    return final_score
 
 
 # ╔════════════════════════════════════════════════════════════╗
