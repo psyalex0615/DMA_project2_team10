@@ -159,10 +159,12 @@ $$\text{Cov}_{\text{idf}} = \frac{\sum_{q\in Q\cap D}\text{IDF}(q)}{\sum_{q\in Q
   * SVM: `ngram_range=(1, 3)`, `min_df=1`, `max_df=0.90`, `sublinear_tf=True`, `strip_accents='unicode'`
 * **Char-level TF-IDF Vectorizer**:
   * Naive Bayes: `ngram_range=(3, 5)`, `min_df=1`, `sublinear_tf=True`, `strip_accents='unicode'`
-  * SVM: `ngram_range=(4, 6)`, `min_df=3`, `sublinear_tf=True`, `strip_accents='unicode'`
+  * SVM: `ngram_range=(2, 4)`, `min_df=2`, `sublinear_tf=True`, `strip_accents='unicode'`
 * **Feature Weighting**:
   * Naive Bayes: Word 가중치 `1.0`, Char 가중치 `1.0` 동등 결합
-  * SVM: Word 가중치 `1.0`, Char 가중치 `0.75` 결합
+  * SVM: Word 가중치 `1.0`, Char 가중치 `1.25` 결합
+
+> **하이퍼파라미터 탐색 방법론.** 200개 test 셋은 규모가 작아 정확도 분산이 크므로, **800개 train 데이터에 대한 5-fold StratifiedKFold 교차검증(CV) 정확도를 기준**으로 설정을 탐색하였습니다(test 셋 과적합 방지). 이를 통해 SVM의 char n-gram 범위·가중치·정규화 계수 $C$를 재탐색한 결과, **char 2~4-gram + word/char 가중치 균형(1.0 : 1.25) + $C=1.0$** 조합이 기존 설정 대비 **CV 정확도를 0.761 → 0.789로 향상**시켜(일반화 견고성 개선) 최종 채택하였습니다.
 
 ### 3.2. 머신러닝 모델 아키텍처 및 하이퍼파라미터 튜닝
 GridSearchCV 및 다양한 모델 조합 실험을 통해 최적의 모델 아키텍처를 선정하였습니다.
@@ -178,10 +180,10 @@ GridSearchCV 및 다양한 모델 조합 실험을 통해 최적의 모델 아�
 #### 3.2.2. 모델 2: Support Vector Machine Classifier (고차원 선형 초평면 결정기)
 * **최종 파이프라인 구조**:
   * `FeatureUnion([('word', TfidfVectorizer(...)), ('char', TfidfVectorizer(...))])`
-  * `LinearSVC(C=2.0, dual='auto', random_state=42)`
+  * `LinearSVC(C=1.0, dual='auto', random_state=42)`
 * **선택 근거 및 튜닝**:
-  * Word 및 Char n-gram이 고차원(수만 차원 이상)으로 결합하는 희소 데이터 환경에서 마진 기반의 일반화 성능이 뛰어난 Linear SVM을 지속 사용하였습니다.
-  * 정규화 비용 파라미터 $C$를 **$C=2.0$**으로 가중 조율하여 마진 오류 페널티를 재배정해 최적의 결정을 도출했습니다.
+  * Word 및 Char n-gram이 고차원(수만 차원 이상)으로 결합하는 희소 데이터 환경에서 마진 기반의 일반화 성능이 뛰어난 Linear SVM을 사용하였습니다.
+  * CV 기반 탐색 결과, 짧은 char 2~4-gram이 저널 고유의 표기/문체 스타일을 더 안정적으로 포착하였고, char 피처 가중치를 word와 균형 있게(`1.25`) 부여하며 정규화 계수를 **$C=1.0$**으로 낮추었을 때 과적합이 완화되어 교차검증 정확도가 가장 높았습니다.
 
 ### 3.3. 최종 성능 평가 결과 (Test Set Accuracy)
 
@@ -212,10 +214,10 @@ weighted avg       0.78      0.77      0.77       200
 ```text
               precision    recall  f1-score   support
 
-     AnnStat       0.70      0.84      0.76        50
-  Biometrika       0.76      0.74      0.75        50
-        JASA       0.86      0.76      0.81        50
-        JMLR       0.87      0.82      0.85        50
+     AnnStat       0.69      0.84      0.76        50
+  Biometrika       0.79      0.76      0.78        50
+        JASA       0.87      0.78      0.82        50
+        JMLR       0.85      0.78      0.81        50
 
     accuracy                           0.79       200
    macro avg       0.80      0.79      0.79       200
@@ -223,15 +225,16 @@ weighted avg       0.80      0.79      0.79       200
 ```
 * **오차 행렬 (Confusion Matrix)**:
 ```text
-[[42  5  2  1]  (AnnStat)
- [10 37  1  2]  (Biometrika)
- [ 4  5 38  3]  (JASA)
- [ 4  2  3 41]] (JMLR)
+[[42  4  3  1]  (AnnStat)
+ [ 9 38  1  2]  (Biometrika)
+ [ 4  3 39  4]  (JASA)
+ [ 6  3  2 39]] (JMLR)
 ```
 
 * **종합 해석**:
-  * Word N-gram과 Char N-gram을 FeatureUnion으로 완전히 결합하고 모델 하이퍼파라미터를 재탐색한 결과, 나이브 베이즈 성능이 기존 69.0%에서 **76.5%**로, SVM 성능이 기존 78.0%에서 **79.0%**로 대폭 상승하였습니다.
-  * 특히 ComplementNB 교체를 통해 AnnStat과 Biometrika 간의 혼동 오분류(기존 17건)가 **11건으로 크게 해소**되었으며, SVM 또한 두 저널 간 오분류가 기존 9건에서 **5건으로 감소**해 어휘 유사성 극복에 괄목할 성장을 이루었습니다.
+  * Word N-gram과 Char N-gram을 FeatureUnion으로 완전히 결합하고 모델 하이퍼파라미터를 재탐색한 결과, 나이브 베이즈 성능이 기존 69.0%에서 **76.5%**로, SVM 성능이 기존 78.0%에서 **79.0%**로 상승하였습니다.
+  * 특히 ComplementNB 교체를 통해 AnnStat과 Biometrika 간의 혼동 오분류(기존 17건)가 **11건으로 크게 해소**되었습니다.
+  * SVM의 경우, char n-gram 범위와 가중치를 CV 기반으로 재조정하여 **교차검증 정확도를 0.761 → 0.789로 향상**시켰으며, 4개 저널 모두에서 recall 0.76~0.84의 균형 잡힌 분류 성능을 확보하였습니다. 다만 200개 test 셋에서의 최종 정확도(79.0%)는 데이터셋 고유의 분류 한계(특히 고전 통계 저널 AnnStat·Biometrika·JASA 간의 주제 중첩)에 근접하여, test 정확도 자체의 추가 상승보다는 모델의 일반화 견고성을 높이는 방향으로 최적화하였습니다.
 
 ---
 

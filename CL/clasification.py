@@ -93,17 +93,17 @@ clf_svm = Pipeline(
                         "char",
                         TfidfVectorizer(
                             analyzer="char_wb",
-                            ngram_range=(4, 6),
-                            min_df=3,
+                            ngram_range=(2, 4),
+                            min_df=2,
                             sublinear_tf=True,
                             strip_accents="unicode",
                         ),
                     ),
                 ],
-                transformer_weights={"word": 1.0, "char": 0.75},
+                transformer_weights={"word": 1.0, "char": 1.25},
             ),
         ),
-        ("clf", LinearSVC(C=2.0, dual="auto", random_state=42)),
+        ("clf", LinearSVC(C=1.0, dual="auto", random_state=42)),
     ]
 )
 clf_svm.fit(train_data.data, train_data.target)
